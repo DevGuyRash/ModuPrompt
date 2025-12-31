@@ -39,18 +39,17 @@ Set a name for the variable, a mode, and a value. Mode is something like arithme
 
 We need a consistent, explicit syntax for injecting content from nodes into prompts. Different syntaxes will map to different node types or actions.
 
-Initial proposal (subject to change):
+Initial proposal (subject to change): the bracket type determines the token's node/type. The value inside should be auto-complete only and never require a manual type prefix.
 
-- `{{var}}` for Variable Nodes (primitive values: text, number, boolean, etc.)
-- `[[prompt:Name]]` or `[[prompt:ID]]` for Prompt Nodes (inject another prompt block)
-- `[[ref:ID]]` for Reference Nodes (documents, URLs, database objects)
-- `<<semantic:keyword>>` for Semantic Keywords (see dictionary below)
+- `{{...}}` for Variable Nodes (primitive values: text, number, boolean, etc.)
+- `[[...]]` for Prompt Nodes (inject another prompt block)
+- `<<...>>` for Reference Nodes or Semantic Keywords (TBD which maps to what)
 
 Rules:
 
 - Syntax should be unambiguous, easy to parse, and safe to include in raw text.
 - Validation should warn on unresolved tokens and show the node it expects.
-- The prompt editor should auto-complete tokens from available nodes and dictionary entries.
+- The prompt editor should auto-complete tokens based on the bracket type and availability of the values / objects matching the bracket type.
 
 #### Semantic Keyword Dictionary (Reusable Prompt Phrases)
 
@@ -68,6 +67,10 @@ An "easy mode" that builds prompts for users by selecting semantic keywords/phra
 - Lets users mix and match keywords from categories (tone, format, audience, constraints).
 - Outputs a Prompt Node or a composite prompt that can be edited normally afterward.
 - Can optionally show a "why this was selected" explanation for transparency.
+
+#### Prompt Node Editor
+
+The prompt node editor is a spatial visual canvas that allows users to drag and drop nodes to create a prompt. The canvas is a grid of nodes that can be connected to form a prompt. However, it's powerful because nodes can connect to one another, there are many types of nodes, different objects (such as indexed websites stored in the web librarian, variables, semantic keywords, other prompt nodes, etc.) can be used either inside the prompt or as inputs to the prompt nodes.
 
 Other node ideas:
 
