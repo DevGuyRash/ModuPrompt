@@ -106,7 +106,27 @@ Other node ideas:
 
 I'm thinking that each node would want an ID associated with it and we will likely be storing all of this in a database too.
 
+#### Brainstorm Mode (Generative Diagramming)
+
+A generative layer that lives within the diagramming interface, positioning the AI as an on-demand accelerator within a fully manual workspace. It shifts the focus from "drawing" to "discovering," allowing the AI to fill in semantic gaps or expand on concepts when explicitly triggered.
+
+- **Core Concept**: Users retain full agency to manually add nodes and draw connections. The AI acts as a "co-pilot" that can be invoked to bridge gaps or generate new ideas based on the existing canvas state.
+- **Workflow (User + AI Loop)**:
+    1. **Seed Nodes**: The user manually places nodes representing key ideas, goals, or constraints.
+    2. **AI Actions (On-Demand)**: The user selects one or more nodes and triggers specific generative functions:
+        - **Connect (Converge)**: The AI analyzes selected nodes and attempts to link them.
+            - *Direct Links*: If concepts are semantically close, it draws a labeled connection line.
+            - *Thought Bridging*: If concepts are distant or abstract, the AI generates intermediate nodes (e.g., 1–3 bridging concepts) to show the logical path from A to B.
+        - **Expand (Diverge)**: The AI generates child nodes from the selected node(s), effectively branching out new possibilities or sub-tasks without forcing a connection to a specific destination.
+        - **Bulk Synthesis**: If a user creates a "soup" of disconnected nodes, this mode attempts to tidy them up by finding logical connections between any of the floating nodes, effectively turning a scattered list into a networked graph.
+- **Visual Feedback**:
+  - **Retrospective Animation**: To help users follow the AI's logic, the system plays a "replay" animation of the generation process—nodes popping in and lines drawing sequentially—even though the backend generation happens instantly.
+- **Complexity Management**:
+  - **Strict vs. Creative Controls**: Toggles to limit how far the AI can deviate (e.g., "Max Bridge Depth" or "Branching Factor").
+  - **Voting / Purge**: Since generation can be messy, users can enter a "Review Mode" to quickly accept, reject, or prune generated clusters.
+
 ### Agent Orchestration Mode
+
 The command center for multi-agent workflows, heavily inspired by Agor's worktree-centric approach.
 
 - **Worktree-Centric Workflow**:
@@ -147,7 +167,13 @@ Reimagining [WebToEpub][5] with a focus on performance, concurrency, and AI inte
 
 - **Goal**: Create a reliable, high-speed engine to turn web series (novels, docs, tutorials) into portable documents (EPUB, PDF, DOCX, MD).
 - **Key Features**:
-  - **Library System**: Users maintain a persistent library of tracked sites/series.
+  - **Library & Monitoring System**:
+    - **Persistent Library**: Users maintain a tracked list of series/sites.
+    - **Change Detection**: Automatically monitors sites for new chapters or content updates (diffing against previous snapshots).
+    - **Update Triggers**: Configurable polling intervals to check for "Next" links or new entries in a TOC.
+  - **Smart Navigation & Discovery**:
+    - **"Next" Button Logic**: Like WebToEpub, users can specify a "Next Chapter" selector to crawl linear series without a central TOC.
+    - **Link Containers**: Users can define a specific section (div/container) to exclusively gather links from, filtering out navigation/footer noise.
   - **Concurrency First**: Async Rust backend (Tokio) for parallel fetching and parsing. No UI freezing; extremely fast crawling.
   - **Smart Parsing (AI & Manual)**:
     - **AI-Assisted**: Pass a URL to the agent; it analyzes the DOM to find the Table of Contents, chapter sequence, and content body, bypassing the need for brittle, site-specific hardcoded logic.
