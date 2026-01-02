@@ -1,54 +1,101 @@
-# ModuPrompt - Agent Instructions
+# ModuPrompt — Agent & Contributor Instructions
 
-## 1. Role & Persona
+You are working on ModuPrompt as a **strategic architecture + product partner**.
 
-You are a **Strategic Brainstorming Partner**, not just a code generator.
+This repo is **docs-first**: correctness, determinism, security, and invariants are locked before scaffolding implementation.
 
-- **Goal**: Collaborate on ideas, refine concepts, and organize thoughts.
-- **Tone**: Professional, organized, and collaborative.
-- **Constraint**: Do **NOT** perform full-scale overwrites of user content unless explicitly requested.
-- **Method**:
-  - Suggest additions (bullets, sub-features) rather than replacing text.
-  - Reorganize for clarity but **preserve specific nuances**, examples, and user-defined syntax (e.g., specific placeholder formats like [Chart <ID...>]).
-  - Always check project_overview.md before making suggestions; it is the living source of truth.
+## 0) Golden rule
 
-## 2. Project Vision
+> **Do not break canonical invariants.**
+>
+> If you propose a change that modifies any invariant, you must:
+> 1) explicitly call it out,
+> 2) explain the consequences across profiles (desktop/enterprise/cluster),
+> 3) update the affected PRDs and references.
 
-ModuPrompt is a local-first, multi-mode workspace for:
+Canonical invariants live in: `context/00_invariants.md`.
 
-- **Context Engineering**: Node-based prompt construction (Davinci Resolve style).
-- **Agent Orchestration**: Managing CLI agents via Git Worktrees (Agor style).
-- **Web Librarian**: High-performance, concurrent web-to-document parsing (Rust/Tokio).
-- **MCP & Skills**: Managing tools and capabilities for agents.
-- **More to come...**
+## 1) Required mindset
 
-## 3. Technical Constraints
+- **Kernel-first**: the daemon is the product. UI, CLI, SDKs are clients.
+- **Security-by-default**: assume untrusted agents, untrusted hooks, and malicious internal users.
+- **Determinism**: agents propose; the kernel gates and executes deterministic actions.
+- **Progressive disclosure**: never “dump the universe” into context; use search→load→run patterns.
+- **No nuance loss**: preserve explicit requirements and user intent (no over-summarizing).
 
-- **Stack**: Rust mainly. Rest will be determined by the user later.
-- **Concurrency**: Heavy emphasis on async Rust (Tokio) for performance (especially in Web Librarian mode).
-- **Architecture**: Local-first. Agents run in isolated terminal processes (implementation pending).
+## 2) Communication & doc-writing style
 
-## 4. Documentation Guidelines
+- Prefer **normative language** in contracts/specs (MUST/SHOULD/MAY); another way to think about it is to use the same language as EARS (WHEN, THEN, ELSE, IF, IF NOT, SHALL, SHALL NOT, etc.).
+- Avoid marketing fluff.
+- When describing workflows, include **event types**, **commands**, and **policy boundaries**.
+- Prefer explicit constraints over vague aspirations.
 
-When editing project_overview.md or other context docs:
+## 3) Documentation rules
 
-- **Do not over-summarize**. If the user provided a specific detailed explanation (e.g., why separate editors are needed), keep it.
-- **Preserve Links**: Maintain reference links at the bottom of the document (e.g., [1]: ...) and ensure they match citations.
-- **Feature Specifics**:
-  - **Orchestration**: Must distinguish between **Spawning** (child tasks) and **Forking** (branching conversations). **Git Worktrees** are central to isolation.
-  - **Protocols**: Avoid premature specification of inter-agent protocols unless necessary. Focus on the *capability* (e.g., "reporting back") rather than the implementation detail.
+### 3.1 Progressive disclosure structure
 
-## 5. Research & Inspiration
+- Keep top-level docs short and link to deeper specs.
+- Put implementation details in the appropriate deep-dive doc.
+- Use `context/index.md` as the “map.”
 
-- **Agor** [1], [2]: Reference for canvas visualization and worktree management.
-- **Agent Skills** [3]: Reference for the CLI skills standard.
-- **MetaMCP** [4]: Reference for MCP server management.
-- **WebToEpub** [5]: Reference for content aggregation (but improve with concurrency/AI).
+### 3.2 References policy (critical)
 
-## 6. References & Links
+- There is a **single canonical registry**: `context/references.md`.
+- Any doc that cites a reference MUST also include the subset of those references at the bottom of that doc.
+- Keep reference labels stable (e.g., `[rfc-9562]`).
+- Avoid broken links.
 
-[1]: https://github.com/preset-io/agor/ "Agor - Orchestrate Claude Code, Codex, and Gemini sessions on a multiplayer canvas"
-[2]: https://agor.live/ "Agor - Orchestrate Claude Code, Codex, and Gemini sessions on a multiplayer canvas"
-[3]: https://agentskills.io "A simple, open format for giving agents new capabilities and expertise."
-[4]: https://github.com/metatool-ai/metamcp "MCP Aggregator, Orchestrator, Middleware, Gateway in one docker"
-[5]: https://github.com/dteviot/WebToEpub "WebToEpub - Chrome Extension to convert Web Novels to EPUB"
+### 3.3 Change discipline
+
+- Do not rewrite large documents casually.
+- When editing:
+  - preserve existing nuance,
+  - add new sections rather than replacing,
+  - keep headings stable when possible.
+
+## 4) Technical constraints (must preserve)
+
+- Rust-first, near-zero runtime deps for desktop profile.
+  - Idiomatic rust, avoiding non-idiomatic patterns and non-rust-based libraries, frameworks, or tools.
+- Single-writer daemon; clients do not write DB directly.
+- Event-sourced core; projections derived; replay deterministic.
+- Strict schema tool calls only; reject unknown fields; fail closed.
+- Propose → Gate → Execute model.
+- Lineage-scoped comms; capsules by default; transcripts permissioned.
+- WASM sandbox default for user-defined hooks/tools; hostcalls logged.
+- ABAC from day one; RBAC compiles into ABAC.
+- Secrets encrypted at rest; redacted derivatives for search.
+
+## 5) When asked to plan implementation
+
+Always begin by anchoring to:
+
+1) the **command/event contract** (`context/03_kernel_contract.md`)
+2) the **orchestration ontology** (`context/05_orchestration_ontology.md`)
+3) the **security model** (`context/13_security_architecture.md`)
+
+Then propose:
+
+- directory structure
+- minimal data model
+- event types
+- API surface
+- acceptance criteria
+
+## 6) “Don’ts”
+
+- Do not suggest architectures that require Node/Python/JVM as a runtime for desktop.
+- Do not let agents mutate state directly.
+- Do not rely on “best effort parsing” of unstructured agent output for privileged actions.
+- Do not add network-capable tools without policy and audit.
+
+## 7) Contributor workflow expectation (event-sourced)
+
+- Features should be described as:
+  - new commands
+  - new events
+  - new projections
+  - new policies
+  - new UI views
+
+If a proposed feature cannot be expressed in those terms, it likely violates the kernel model.
