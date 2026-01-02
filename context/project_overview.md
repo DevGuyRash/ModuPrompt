@@ -1,207 +1,141 @@
-# ModuPrompt - PRD V0.0.1
+# ModuPrompt — Project Overview (Refined)
 
-## 1. Project Overview
+**Status:** Canonical product overview.
 
-ModuPrompt is envisioned as a comprehensive end-product where users can operate in several distinct but interoperable modes.
+## 1) One sentence
 
-### **Context Engineering & Diagrams**
+ModuPrompt is a **local-first, event-sourced orchestration kernel** that makes agents first-class citizens: they run in controlled execution environments, communicate through policy-enforced lineage scopes, and advance through deterministic pipelines that are inspectable and replayable.
 
-- **Node-Based Workflows**: Users can prompt/context engineer using a canvas. Prompts are modular with inputs/outputs that can connect to form a final prompt.
-  - There are many node types (slicers, filters, etc.) that modify prompts based on inputs, passing outputs to other nodes.
-  - **Dedicated Editors**: The node editor is separate from the prompt editor. Editing long prompts inside a node can be difficult, so we will provide a popout modal and a dedicated editing tab (a general-purpose editor) to be reused across features.
-- **Diagramming (Mermaid + PlantUML)**: Create/draw diagrams that have IDs attached to them.
-  - Ideally, we can insert any Object into a prompt. Inserting a chart object (referencing a specifically created chart) will create a placeholder like [Chart <ID-truncated...>].
-  - The final produced version will have the full Mermaid or PlantUML code injected into it.
+## 2) What ModuPrompt is (and isn’t)
 
-### **Orchestration & Management**
+### It is
 
-- **Agent Orchestration**: An empty canvas (inspired by [Agor][1], [2]) to manage git worktrees, track AI conversations, and visualize agentic work in real-time.
-  - **Agent-Agnostic**: Supports multi-agent orchestration without hijacking agent CLIs; it simply provides a robust space to run them.
-  - **Communication**: Supports inter-agent communication via a protocol (TBD).
-  - **Lifecycle**: Can spawn or fork conversations.
-- **MCP Management**: Manage, inspect, and debug MCP servers, similar to [MetaMCP][4].
-- **CLI Skills Management**: Manage [Agent Skills][3]�specifically searching, installing, and syncing skills across different agentic CLI tools (Claude Code, Gemini CLI, Factory AI Droid CLI, OpenAI Codex CLI, etc.).
-- **Web Librarian**: A reimagined content aggregator (based on [WebToEpub][5]) for reliable, high-speed, concurrent, and AI-assisted parsing of web series into portable documents.
+- A **control plane** for agentic work: sessions, worktrees, tasks, artifacts, gates, approvals.
+- A way to build “agents” as **hook/middleware pipelines** (not a single system prompt blob).
+- A system where **state changes are tool-executed and logged** (Propose → Gate → Execute).
+- A platform that can run **headless** (daemon + API), with multiple clients (GUI/web/CLI).
 
-*I don't think all of this would be in a single UI-space, but you can switch between the different operating modes and then have them work together.*
+### It is not
 
-## 2. Feature Deep Dives
+- Not a generic “chat app with tools.”
+- Not a full IDE replacement.
+- Not a Git hosting product.
+- Not a magical nondeterministic automation engine (actions must be inspectable and replayable).
 
-### Prompt Engineering / Context Engineering Mode
+## 3) Primary users
 
-This is the node-based visual editor. Think like Davinci Resolve's node-based editor, but for prompts.
+### Day 1
 
-This is where a prompt engineer comes to create a prompt from scratch or modify an existing prompt. However, they may not always want to plug in a massive prompt by itself. So what we do instead is create something that doesn't exist anywhere else. Each node can be a different type of node. For example, a variable node:
+- Solo power users and senior engineers/team leads who already juggle multiple repos + multiple LLM tools and want a deterministic, auditable system to manage the chaos.
+- Platform/DevOps-minded builders who care about policy, automation, security, and repeatability.
 
-Set a name for the variable, a mode, and a value. Mode is something like arithmetic, text, number, etc. We may add more in the future. If a mode is incompatible with what the user specified, we just put it as text and notify them.
+### Later
 
-#### Prompt Injection and Template Syntax (TBD)
+- Teams and enterprises needing multiplayer collaboration, RBAC/ABAC policy, auditability, secrets handling, and safe execution.
 
-We need a consistent, explicit syntax for injecting content from nodes into prompts. Different syntaxes will map to different node types or actions.
+## 4) Product pillars
 
-Initial proposal (subject to change): the bracket type determines the token's node/type. The value inside should be auto-complete only and never require a manual type prefix.
+1. **Determinism you can trust**
+   - Same event log ⇒ same state.
+   - Nondeterministic outputs become artifacts that are pinned and replayable.
 
-- `{{...}}` for Variable Nodes (primitive values: text, number, boolean, etc.)
-- `[[...]]` for Prompt Nodes (inject another prompt block)
-- `<<...>>` for Reference Nodes or Semantic Keywords (TBD which maps to what)
+2. **Headless kernel, optional UI**
+   - Daemon owns writes.
+   - GUI is a client on top of stable API + event stream.
 
-Rules:
+3. **Security-first (enterprise-compatible from day one)**
+   - ABAC+RBAC, capability tokens, deny-by-default network.
+   - Secrets encrypted at rest, redacted derivatives for search/index.
+   - Immutable audit stream, tamper-evident event chain.
 
-- Syntax should be unambiguous, easy to parse, and safe to include in raw text.
-- Validation should warn on unresolved tokens and show the node it expects.
-- The prompt editor should auto-complete tokens based on the bracket type and availability of the values / objects matching the bracket type.
+4. **Progressive disclosure at scale**
+   - Tools/skills/context are discovered and loaded on-demand.
+   - Hard budgets enforced by the kernel.
 
-#### Semantic Keyword Dictionary (Reusable Prompt Phrases)
+5. **Programmable but safe**
+   - Hooks/extensions run in sandboxed WASM.
+   - Deterministic hostcalls are logged.
 
-We define a dictionary of semantic keywords and phrases that are effectively reusable prompt snippets. These are stored as small prompt fragments and can be injected anywhere a prompt token is accepted.
+## 5) The 5-minute “wow”
 
-- Each entry has: `keyword`, `type`, `description`, `value`, and optional `constraints`.
-- Keywords can be tagged and grouped by domain (e.g., "tone", "format", "safety", "audience").
-- Entries are versioned so prompt nodes can lock to a specific revision if needed.
+Open the app and immediately see a living orchestration universe:
 
-#### Easy Mode: Prompt Composer (Vision)
+- Multiple projects.
+- Sessions organized into a **session tree** (lineage).
+- Worktree-per-session where appropriate (with 1 writer and many readers).
+- Agents can spawn agents and exchange messages in **lineage-scoped channels**.
+- A deterministic pipeline where work advances through stages, gates, and approvals.
 
-An "easy mode" that builds prompts for users by selecting semantic keywords/phrases. This mode:
+This is **governable agentic work**, not chat.
 
-- Enforces a minimum set of required keywords (configurable per template or workflow).
-- Lets users mix and match keywords from categories (tone, format, audience, constraints).
-- Outputs a Prompt Node or a composite prompt that can be edited normally afterward.
-- Can optionally show a "why this was selected" explanation for transparency.
+## 6) Core primitives (cross-mode)
 
-#### Prompt Node Editor
+- Workspace, Project
+- Board/Canvas
+- Session, Agent
+- Worktree
+- Task/Job
+- Pipeline, Stage, Gate, Approval
+- Tool, Skill
+- Artifact, Capsule
+- Policy, Capability Lease
+- Event, Audit Entry
+- Execution Backend
+- Secret / Env Var
 
-The prompt node editor is a spatial visual canvas that allows users to drag and drop nodes to create a prompt. The canvas is a grid of nodes that can be connected to form a prompt. However, it's powerful because nodes can connect to one another, there are many types of nodes, different objects (such as indexed websites stored in the web librarian, variables, semantic keywords, other prompt nodes, etc.) can be used either inside the prompt or as inputs to the prompt nodes.
+See: `03_kernel_contract.md`, `05_orchestration_ontology.md`, `agent/06_agent_system.md`.
 
-Other node ideas:
+## 7) Modes vs capabilities
 
-- Prompt node
-  - Inputs:
-    - Other Prompt nodes
-  - Outputs:
-    - One output is the final value produced. The prompt typed in here is either inserted, prepended, or appended to the input prompt.
-  - Modes:
-    - Append
-    - Prepend
-    - Insert
-- Filter Node
-  - Inputs:
-    - Prompt nodes
-    - other nodes I haven't thought of yet
-  - Outputs:
-    - Input nodes with filters applied
-  - Ideas:
-    - Can be stuff  like regex replace, string replace, regex capture, etc.
-    - Can filter muliple input nodes and maybe exclude certain nodes based on a condition or node type?
-    - Think of more stuff later…
-- Aggregator Node
-  - Inputs: Multiple prompt or data nodes
-  - Outputs: A single combined output (concatenated, list, or JSON)
-- Switch / Conditional Node
-  - Inputs: A value to check and multiple conditional paths
-  - Outputs: Routes the flow to different branches based on logic (If/Else, Case)
-- Reference Node
-  - Types: Document, URL, Database Object, etc.
-  - Function: Injects external context into the prompt workflow via reference IDs.
-- Lots of other node types
+ModuPrompt is a multi-mode workspace, but **modes are ultimately capabilities on top of the kernel**.
 
-I'm thinking that each node would want an ID associated with it and we will likely be storing all of this in a database too.
+### MVP mode: Orchestrator (Command Center)
 
-#### Brainstorm Mode (Generative Diagramming)
+- Board(s) that visualize projects, sessions, tasks, gates, approvals.
+- Worktree-centric workflows.
+- Deterministic pipeline execution.
+- CLI-first automation and headless operation.
 
-A generative layer that lives within the diagramming interface, positioning the AI as an on-demand accelerator within a fully manual workspace. It shifts the focus from "drawing" to "discovering," allowing the AI to fill in semantic gaps or expand on concepts when explicitly triggered.
+### Later capabilities (plugin-like)
 
-- **Core Concept**: Users retain full agency to manually add nodes and draw connections. The AI acts as a "co-pilot" that can be invoked to bridge gaps or generate new ideas based on the existing canvas state.
-- **Workflow (User + AI Loop)**:
-    1. **Seed Nodes**: The user manually places nodes representing key ideas, goals, or constraints.
-    2. **AI Actions (On-Demand)**: The user selects one or more nodes and triggers specific generative functions:
-        - **Connect (Converge)**: The AI analyzes selected nodes and attempts to link them.
-            - *Direct Links*: If concepts are semantically close, it draws a labeled connection line.
-            - *Thought Bridging*: If concepts are distant or abstract, the AI generates intermediate nodes (e.g., 1–3 bridging concepts) to show the logical path from A to B.
-        - **Expand (Diverge)**: The AI generates child nodes from the selected node(s), effectively branching out new possibilities or sub-tasks without forcing a connection to a specific destination.
-        - **Bulk Synthesis**: If a user creates a "soup" of disconnected nodes, this mode attempts to tidy them up by finding logical connections between any of the floating nodes, effectively turning a scattered list into a networked graph.
-- **Visual Feedback**:
-  - **Retrospective Animation**: To help users follow the AI's logic, the system plays a "replay" animation of the generation process—nodes popping in and lines drawing sequentially—even though the backend generation happens instantly.
-- **Complexity Management**:
-  - **Strict vs. Creative Controls**: Toggles to limit how far the AI can deviate (e.g., "Max Bridge Depth" or "Branching Factor").
-  - **Voting / Purge**: Since generation can be messy, users can enter a "Review Mode" to quickly accept, reject, or prune generated clusters.
+- **Context engineering / prompt graph** (node-based prompt composition)
+- **MCP management** (inspect/debug tool servers)
+- **Skills hub** (discover/install/sync skills across agent CLIs)
+- **Web Librarian** (high-performance web-to-document engine)
 
-### Agent Orchestration Mode
+These are all expected to integrate via tools/skills and the event log.
 
-The command center for multi-agent workflows, heavily inspired by Agor's worktree-centric approach.
+## 8) MVP scope (first deliverable)
 
-- **Worktree-Centric Workflow**:
-  - **Git Worktree Integration**: First-class support for git worktrees. Each agent session runs in its own isolated worktree, allowing parallel development on different features/branches without file conflicts.
-  - **Session-Per-Worktree**: Automatically spawn agent sessions dedicated to specific worktrees.
-- **Session Lifecycles (Spawn vs. Fork)**:
-  - **Spawning (Child Sessions)**:
-    - Agents can spawn child sessions to delegate sub-tasks.
-    - Child sessions are linked to the parent and report back results upon completion.
-  - **Forking (User-Driven)**:
-    - Users can manually fork any active conversation state into a new, separate session to explore alternative paths.
-- **Permissioned Session Types**:
-  - **Tiered Permissions**: Sessions are assigned roles/types with distinct capabilities.
-  - **Orchestrator**: High-level permission to create/manage git worktrees and oversee project structure.
-  - **Worker/Standard**: Can spawn child sessions but limited to their assigned worktree/directory.
-- **Canvas Interface**:
-  - Visualizing the hierarchy of Parent -> Child sessions and Worktree associations.
+MVP ships a working kernel + CLI + minimal desktop UI shell focused on orchestration:
 
-### MCP (Model Context Protocol) Mode
+- Daemon skeleton
+- Command API (typed SDKs; generic wire)
+- Event store + projections
+- Workspace + project management
+- Session spawn/fork + lineage
+- Worktree operations (create/list/delete/status/diff/commit)
+- Task lifecycle + retries + timeouts
+- Capsules generation and sharing rules
+- Tool registry (search/load/run) + strict schema validation
+- Hooks pipeline (WASM sandbox) at least for policy/audit and tool gating
 
-A dedicated suite for managing and debugging the connections between LLMs and external data/tools.
+## 9) Enterprise roadmap (high-level)
 
-- **Server Manager**:
-  - Auto-discovery of local MCP servers.
-  - GUI to Start/Stop/Restart servers.
-  - Environment variable configuration per server.
-- **Inspector / Debugger**:
-  - **Request/Response Log**: View raw JSON-RPC traffic between client and server.
-  - **Tool Tester**: Manually invoke tools exposed by an MCP server with custom inputs to verify behavior.
-  - **Resource Browser**: Visualize resources (file trees, database schemas) exposed by servers.
-- **Registry & Installation**:
-  - Integrated browser for community MCP servers (like a "Plugin Store").
-  - One-click install for Docker-based or NPM/Python-based servers.
+- Server mode (Postgres baseline) with multi-user auth (OIDC/SAML), ABAC enforcement
+- Immutable audit stream with signing checkpoints
+- Execution isolation (UID separation + container/pod execution)
+- Web UI for collaboration
+- Cluster profile (NATS JetStream)
 
-### Web Librarian / Content Aggregator Mode
+## 10) Non-goals (explicit)
 
-Reimagining [WebToEpub][5] with a focus on performance, concurrency, and AI intelligence. Built entirely in Rust.
-
-- **Goal**: Create a reliable, high-speed engine to turn web series (novels, docs, tutorials) into portable documents (EPUB, PDF, DOCX, MD).
-- **Key Features**:
-  - **Library & Monitoring System**:
-    - **Persistent Library**: Users maintain a tracked list of series/sites.
-    - **Change Detection**: Automatically monitors sites for new chapters or content updates (diffing against previous snapshots).
-    - **Update Triggers**: Configurable polling intervals to check for "Next" links or new entries in a TOC.
-  - **Smart Navigation & Discovery**:
-    - **"Next" Button Logic**: Like WebToEpub, users can specify a "Next Chapter" selector to crawl linear series without a central TOC.
-    - **Link Containers**: Users can define a specific section (div/container) to exclusively gather links from, filtering out navigation/footer noise.
-  - **Concurrency First**: Async Rust backend (Tokio) for parallel fetching and parsing. No UI freezing; extremely fast crawling.
-  - **Smart Parsing (AI & Manual)**:
-    - **AI-Assisted**: Pass a URL to the agent; it analyzes the DOM to find the Table of Contents, chapter sequence, and content body, bypassing the need for brittle, site-specific hardcoded logic.
-    - **Manual Mode**: Power-user tools to manually select CSS selectors, define regex patterns for links, or visually pick content blocks.
-  - **Robustness**:
-    - Automatic retries, proxy support, and rate limiting handling.
-    - "Snapshot" capability to freeze a version of a site at a specific time.
-
-### CLI Skills Mode
-
-Centralized management for agent capabilities, conforming to the [Agent Skills][3] standard.
-
-- **Universal Skill Hub**:
-  - A single repository of skills shared across all installed agent CLIs (Codex, Claude, etc.).
-  - Resolves the fragmentation of having to install "search" or "file-edit" separately for every tool.
-- **Skill Authoring**:
-  - GUI wizard to create new skills (define inputs, outputs, commands).
-  - Validation linter to ensure skills meet the standard spec.
-- **Sync & Deploy**:
-  - Sync skills to a remote git repo for team sharing.
-  - "Install to..." feature to symlink or copy skills into specific agent configuration directories.
-  - Hash-based version control to ensure skills are always up to date and identify skills that are out of sync or missing from specific CLIs.
+- Not trying to be an IDE.
+- Not a Git hosting product.
+- Not a generic workflow engine for all domains.
 
 ---
 
-[1]: https://github.com/preset-io/agor/ "Agor - Orchestrate Claude Code, Codex, and Gemini sessions on a multiplayer canvas"
-[2]: https://agor.live/ "Agor - Orchestrate Claude Code, Codex, and Gemini sessions on a multiplayer canvas"
-[3]: https://agentskills.io "A simple, open format for giving agents new capabilities and expertise."
-[4]: https://github.com/metatool-ai/metamcp "MCP Aggregator, Orchestrator, Middleware, Gateway in one docker"
-[5]: https://github.com/dteviot/WebToEpub "WebToEpub - Chrome Extension to convert Web Novels to EPUB"
+## References
 
+[agentskills-spec]: https://agentskills.io/specification "Agent Skills Specification"
