@@ -1,0 +1,13 @@
+[package]
+name = "mp-storage-sqlite"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mp-kernel = { path = "../mp-kernel" }
+mp-protocol = { path = "../mp-protocol" }
+mp-storage = { path = "../mp-storage" }
+mp-projections = { path = "../mp-projections" }
+rusqlite.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

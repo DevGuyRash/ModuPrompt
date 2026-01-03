@@ -1,0 +1,10 @@
+[package]
+name = "mp-storage"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mp-kernel = { path = "../mp-kernel" }
+mp-protocol = { path = "../mp-protocol" }
+serde_json.workspace = true
+thiserror.workspace = true
