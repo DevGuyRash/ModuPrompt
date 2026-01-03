@@ -1,0 +1,14 @@
+[package]
+name = "mp-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+mp-kernel = { path = "../mp-kernel" }
+mp-protocol = { path = "../mp-protocol" }
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+url.workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "mp-projections"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mp-kernel = { path = "../mp-kernel" }
+mp-protocol = { path = "../mp-protocol" }
+thiserror.workspace = true
+serde_json.workspace = true
