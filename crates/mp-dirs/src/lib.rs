@@ -78,3 +78,93 @@ fn home_dir() -> PathBuf {
     }
     PathBuf::from(".")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::path::Path;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvGuard {
+        home: Option<String>,
+        userprofile: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(home: Option<&str>, userprofile: Option<&str>) -> Self {
+            let home_old = env::var("HOME").ok();
+            let user_old = env::var("USERPROFILE").ok();
+
+            match home {
+                Some(value) => env::set_var("HOME", value),
+                None => env::remove_var("HOME"),
+            }
+            match userprofile {
+                Some(value) => env::set_var("USERPROFILE", value),
+                None => env::remove_var("USERPROFILE"),
+            }
+
+            Self {
+                home: home_old,
+                userprofile: user_old,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.home {
+                Some(value) => env::set_var("HOME", value),
+                None => env::remove_var("HOME"),
+            }
+            match &self.userprofile {
+                Some(value) => env::set_var("USERPROFILE", value),
+                None => env::remove_var("USERPROFILE"),
+            }
+        }
+    }
+
+    #[test]
+    fn home_dir_prefers_home() {
+        let _lock = env_lock().lock().expect("lock");
+        let _guard = EnvGuard::set(Some("/tmp/mp_home"), Some("/tmp/mp_profile"));
+        assert_eq!(home_dir(), PathBuf::from("/tmp/mp_home"));
+    }
+
+    #[test]
+    fn home_dir_uses_userprofile_when_home_missing() {
+        let _lock = env_lock().lock().expect("lock");
+        let _guard = EnvGuard::set(None, Some("/tmp/mp_profile"));
+        assert_eq!(home_dir(), PathBuf::from("/tmp/mp_profile"));
+    }
+
+    #[test]
+    fn fallback_dirs_use_moduprompt_layout() {
+        let _lock = env_lock().lock().expect("lock");
+        let _guard = EnvGuard::set(Some("/tmp/mp_home"), None);
+        let (config_dir, data_dir) = fallback_dirs();
+        assert_eq!(
+            config_dir,
+            PathBuf::from("/tmp/mp_home/.moduprompt/config")
+        );
+        assert_eq!(
+            data_dir,
+            PathBuf::from("/tmp/mp_home/.moduprompt/data")
+        );
+    }
+
+    #[test]
+    fn default_paths_have_expected_suffixes() {
+        let db_path = default_db_path();
+        assert!(db_path.ends_with(Path::new("state").join("mpd.sqlite")));
+
+        let runtime_path = runtime_file_path();
+        assert!(runtime_path.ends_with(Path::new("daemon.json")));
+    }
+}

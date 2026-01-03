@@ -370,3 +370,79 @@ fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
     println!("{json}");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_events_watch_defaults() {
+        let cli = Cli::try_parse_from(["mpctl", "events", "watch", "--workspace", "w1"])
+            .expect("parse");
+        match cli.command {
+            Commands::Events { command } => match command {
+                EventCommands::Watch {
+                    workspace,
+                    from,
+                    transport,
+                    mpd_path,
+                    db,
+                } => {
+                    assert_eq!(workspace, "w1");
+                    assert_eq!(from, 0);
+                    assert!(matches!(transport, EventTransport::Sse));
+                    assert!(mpd_path.is_none());
+                    assert!(db.is_none());
+                }
+            },
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parse_events_watch_ndjson() {
+        let cli = Cli::try_parse_from([
+            "mpctl",
+            "events",
+            "watch",
+            "--workspace",
+            "w1",
+            "--transport",
+            "ndjson",
+            "--from",
+            "5",
+        ])
+        .expect("parse");
+        match cli.command {
+            Commands::Events { command } => match command {
+                EventCommands::Watch { transport, from, .. } => {
+                    assert!(matches!(transport, EventTransport::Ndjson));
+                    assert_eq!(from, 5);
+                }
+            },
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parse_events_watch_stdio() {
+        let cli = Cli::try_parse_from([
+            "mpctl",
+            "events",
+            "watch",
+            "--workspace",
+            "w1",
+            "--transport",
+            "stdio",
+        ])
+        .expect("parse");
+        match cli.command {
+            Commands::Events { command } => match command {
+                EventCommands::Watch { transport, .. } => {
+                    assert!(matches!(transport, EventTransport::Stdio));
+                }
+            },
+            _ => panic!("unexpected command"),
+        }
+    }
+}
