@@ -1,7 +1,10 @@
 use futures::StreamExt;
 use mp_client::Client;
 use mp_daemon::{run_daemon, run_stdio_with_io, DaemonConfig, StdioAuth, StdioConfig};
-use mp_protocol::StdioFrame;
+use mp_kernel::{ErrorCode, RuntimeInfo};
+use mp_protocol::{CommandEnvelope, ErrorResponse, StdioFrame, SubmitCommandResponse};
+use reqwest::header::AUTHORIZATION;
+use reqwest::StatusCode;
 use std::net::SocketAddr;
 use tempfile::TempDir;
 use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -17,6 +20,19 @@ async fn wait_for_client(runtime_dir: &std::path::Path) -> anyhow::Result<Client
         sleep(Duration::from_millis(150)).await;
     }
     Err(anyhow::anyhow!("daemon did not become ready"))
+}
+
+async fn read_runtime_info(runtime_dir: &std::path::Path) -> anyhow::Result<RuntimeInfo> {
+    for _ in 0..20 {
+        let path = runtime_dir.join("daemon.json");
+        if let Ok(data) = std::fs::read(&path) {
+            if let Ok(info) = serde_json::from_slice::<RuntimeInfo>(&data) {
+                return Ok(info);
+            }
+        }
+        sleep(Duration::from_millis(150)).await;
+    }
+    Err(anyhow::anyhow!("runtime info not available"))
 }
 
 async fn next_sse_event(
@@ -168,6 +184,80 @@ async fn expected_version_mismatch_rejects() -> anyhow::Result<()> {
         .await?;
     assert!(!response.accepted);
     assert!(response.rejection.is_some());
+    assert_eq!(
+        response.rejection.expect("rejection").code,
+        ErrorCode::ExpectedVersionMismatch
+    );
+
+    handle.abort();
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn http_auth_failure_returns_error_response() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let db_path = temp.path().join("mpd.sqlite");
+    let runtime_dir = temp.path().join("run");
+
+    let config = DaemonConfig {
+        db_path,
+        addr: "127.0.0.1:0".parse::<SocketAddr>()?,
+        runtime_dir: runtime_dir.clone(),
+        safe_mode: false,
+    };
+
+    let handle = tokio::spawn(run_daemon(config));
+    let _client = wait_for_client(&runtime_dir).await?;
+    let info = read_runtime_info(&runtime_dir).await?;
+
+    let url = format!("{}/v1/daemon/ping", info.addr);
+    let resp = reqwest::Client::new().get(url).send().await?;
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let error: ErrorResponse = resp.json().await?;
+    assert_eq!(error.code, ErrorCode::Unauthorized);
+
+    handle.abort();
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn schema_failure_rejects_with_error_code() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let db_path = temp.path().join("mpd.sqlite");
+    let runtime_dir = temp.path().join("run");
+
+    let config = DaemonConfig {
+        db_path,
+        addr: "127.0.0.1:0".parse::<SocketAddr>()?,
+        runtime_dir: runtime_dir.clone(),
+        safe_mode: false,
+    };
+
+    let handle = tokio::spawn(run_daemon(config));
+    let _client = wait_for_client(&runtime_dir).await?;
+    let info = read_runtime_info(&runtime_dir).await?;
+
+    let envelope = CommandEnvelope {
+        command_type: "workspace.create".to_string(),
+        schema_version: 1,
+        payload: serde_json::json!({}),
+        idempotency_key: Some("ik_schema".to_string()),
+        expected_version: None,
+        trace_id: "tr_schema".to_string(),
+    };
+
+    let url = format!("{}/v1/commands/submit", info.addr);
+    let resp = reqwest::Client::new()
+        .post(url)
+        .header(AUTHORIZATION, format!("Bearer {}", info.token))
+        .json(&envelope)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let response: SubmitCommandResponse = resp.json().await?;
+    assert!(!response.accepted);
+    let rejection = response.rejection.expect("rejection");
+    assert_eq!(rejection.code, ErrorCode::InvalidSchema);
 
     handle.abort();
     Ok(())
