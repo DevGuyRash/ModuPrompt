@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+mp-dirs = { path = "../mp-dirs" }
 mp-kernel = { path = "../mp-kernel" }
 mp-protocol = { path = "../mp-protocol" }
 reqwest.workspace = true

@@ -3,6 +3,7 @@ use mp_kernel::{
     DaemonPingResponse, ProjectCreatePayload, ProjectListEntry, RuntimeInfo,
     WorkspaceCreatePayload, WorkspaceListEntry,
 };
+use mp_dirs::runtime_dir as default_runtime_dir_impl;
 use mp_protocol::{CommandEnvelope, SubmitCommandResponse};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::{Client as HttpClient, Response};
@@ -33,10 +34,7 @@ impl Client {
     }
 
     pub fn default_runtime_dir() -> PathBuf {
-        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-            return PathBuf::from(dir).join("moduprompt");
-        }
-        home_dir().join(".moduprompt").join("run")
+        default_runtime_dir_impl()
     }
 
     pub async fn ping(&self) -> anyhow::Result<DaemonPingResponse> {
@@ -191,14 +189,4 @@ fn new_idempotency_key() -> String {
 
 fn new_trace_id() -> String {
     format!("tr_{}", Uuid::now_v7())
-}
-
-fn home_dir() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        return PathBuf::from(home);
-    }
-    if let Ok(home) = std::env::var("USERPROFILE") {
-        return PathBuf::from(home);
-    }
-    PathBuf::from(".")
 }

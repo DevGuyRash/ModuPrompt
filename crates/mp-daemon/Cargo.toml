@@ -3,6 +3,13 @@ name = "mp-daemon"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "mpd"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
@@ -10,6 +17,7 @@ async-stream.workspace = true
 base64.workspace = true
 clap.workspace = true
 futures.workspace = true
+mp-dirs = { path = "../mp-dirs" }
 mp-kernel = { path = "../mp-kernel" }
 mp-protocol = { path = "../mp-protocol" }
 mp-storage = { path = "../mp-storage" }

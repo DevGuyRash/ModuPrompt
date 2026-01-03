@@ -6,6 +6,7 @@ use axum::{
 };
 use futures::StreamExt;
 use base64::Engine;
+use mp_dirs::{default_db_path as default_db_path_impl, runtime_dir as runtime_dir_impl};
 use mp_kernel::{
     command_kind, now_rfc3339, Actor, CommandKind, CommandRejectedPayload, DaemonPingResponse,
     ErrorCode, ProjectCreatePayload, RuntimeInfo, WorkspaceCreatePayload, EVENT_COMMAND_REJECTED,
@@ -555,22 +556,9 @@ fn set_private_file_perms(path: &Path) -> anyhow::Result<()> {
 }
 
 pub fn default_runtime_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        return PathBuf::from(dir).join("moduprompt");
-    }
-    home_dir().join(".moduprompt").join("run")
+    runtime_dir_impl()
 }
 
 pub fn default_db_path() -> PathBuf {
-    home_dir().join(".moduprompt").join("state").join("mpd.sqlite")
-}
-
-fn home_dir() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        return PathBuf::from(home);
-    }
-    if let Ok(home) = std::env::var("USERPROFILE") {
-        return PathBuf::from(home);
-    }
-    PathBuf::from(".")
+    default_db_path_impl()
 }
