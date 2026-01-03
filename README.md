@@ -57,11 +57,15 @@ ModuPrompt supports different profiles without rewriting the kernel:
   - Storage/projections: Postgres
   - Optional: Redis for caching/coordination
 
-See: `context/12_storage_profiles.md`.
+See: `context/storage/15_storage_profiles.md`.
 
 ## Repository status
 
 This repository is **docs-first** right now: the kernel contracts, security model, and PRDs are specified before scaffolding code.
+
+Implementation planning lives in:
+
+- `context/roadmap.md` — phased delivery goals
 
 ## Quickstart (target interface)
 

@@ -72,7 +72,7 @@ Always begin by anchoring to:
 
 1) the **command/event contract** (`context/03_kernel_contract.md`)
 2) the **orchestration ontology** (`context/05_orchestration_ontology.md`)
-3) the **security model** (`context/13_security_architecture.md`)
+3) the **security model** (`context/security/19_security_architecture.md`)
 
 Then propose:
 
