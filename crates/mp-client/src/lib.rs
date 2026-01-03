@@ -11,6 +11,7 @@ use mp_protocol::{
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::{Client as HttpClient, Response};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -220,6 +221,7 @@ pub struct StdioClient {
     child: Child,
     reader: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
     writer: BufWriter<tokio::process::ChildStdin>,
+    pending_events: VecDeque<Value>,
 }
 
 impl StdioClient {
@@ -254,6 +256,7 @@ impl StdioClient {
             child,
             reader: BufReader::new(stdout).lines(),
             writer: BufWriter::new(stdin),
+            pending_events: VecDeque::new(),
         };
 
         if let StdioAuthMode::Token(token) = auth {
@@ -301,6 +304,9 @@ impl StdioClient {
     }
 
     pub async fn next_event(&mut self) -> anyhow::Result<mp_protocol::EventEnvelope> {
+        if let Some(payload) = self.pending_events.pop_front() {
+            return Ok(serde_json::from_value(payload)?);
+        }
         loop {
             let frame = self.read_frame().await?;
             if frame.frame_type == "events.event" {
@@ -334,6 +340,9 @@ impl StdioClient {
             let frame = self.read_frame().await?;
             if frame.request_id.as_deref() == Some(request_id.as_str()) {
                 return Ok(frame);
+            }
+            if frame.frame_type == "events.event" {
+                self.pending_events.push_back(frame.payload);
             }
         }
     }
