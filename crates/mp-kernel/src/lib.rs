@@ -173,3 +173,59 @@ pub fn now_rfc3339() -> String {
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_kind_classifies() {
+        assert_eq!(
+            command_kind(COMMAND_DAEMON_PING),
+            Some(CommandKind::ReadOnly)
+        );
+        assert_eq!(
+            command_kind(COMMAND_WORKSPACE_CREATE),
+            Some(CommandKind::StateChanging)
+        );
+        assert_eq!(command_kind("unknown.command"), None);
+    }
+
+    #[test]
+    fn error_code_display_matches_wire_format() {
+        assert_eq!(ErrorCode::InvalidSchema.to_string(), "invalid_schema");
+        assert_eq!(ErrorCode::UnknownCommand.to_string(), "unknown_command");
+        assert_eq!(
+            ErrorCode::IdempotencyKeyRequired.to_string(),
+            "idempotency_key_required"
+        );
+        assert_eq!(
+            ErrorCode::ExpectedVersionMismatch.to_string(),
+            "expected_version_mismatch"
+        );
+        assert_eq!(ErrorCode::ValidationFailed.to_string(), "validation_failed");
+        assert_eq!(ErrorCode::Unauthorized.to_string(), "unauthorized");
+        assert_eq!(ErrorCode::NotFound.to_string(), "not_found");
+        assert_eq!(ErrorCode::Internal.to_string(), "internal");
+    }
+
+    #[test]
+    fn actor_rejects_unknown_fields() {
+        let json = r#"{"kind":"system","id":"system","label":null,"extra":true}"#;
+        let result: Result<Actor, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn new_uuid_is_valid() {
+        let id = new_uuid();
+        assert!(Uuid::parse_str(&id).is_ok());
+    }
+
+    #[test]
+    fn now_rfc3339_parses() {
+        let ts = now_rfc3339();
+        let parsed = OffsetDateTime::parse(&ts, &time::format_description::well_known::Rfc3339);
+        assert!(parsed.is_ok());
+    }
+}

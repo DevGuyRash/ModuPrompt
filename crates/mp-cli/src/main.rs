@@ -1,7 +1,7 @@
 use anyhow::Context;
+use clap::{Parser, Subcommand, ValueEnum};
 use futures::StreamExt;
-use clap::{Parser, Subcommand};
-use mp_client::Client;
+use mp_client::{Client, StdioAuthMode, StdioClient};
 use mp_kernel::{ProjectListEntry, WorkspaceListEntry};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -79,7 +79,20 @@ enum EventCommands {
         workspace: String,
         #[arg(long, default_value_t = 0)]
         from: i64,
+        #[arg(long, value_enum, default_value_t = EventTransport::Sse)]
+        transport: EventTransport,
+        #[arg(long)]
+        mpd_path: Option<PathBuf>,
+        #[arg(long)]
+        db: Option<PathBuf>,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum EventTransport {
+    Sse,
+    Ndjson,
+    Stdio,
 }
 
 #[tokio::main]
@@ -139,11 +152,27 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Commands::Events { command } => match command {
-            EventCommands::Watch { workspace, from } => {
-                let client = ensure_client().await?;
-                let workspace_id = resolve_workspace_id(&client, &workspace).await?;
-                watch_events(&client, &workspace_id, from).await?;
-            }
+            EventCommands::Watch {
+                workspace,
+                from,
+                transport,
+                mpd_path,
+                db,
+            } => match transport {
+                EventTransport::Sse => {
+                    let client = ensure_client().await?;
+                    let workspace_id = resolve_workspace_id(&client, &workspace).await?;
+                    watch_events_sse(&client, &workspace_id, from).await?;
+                }
+                EventTransport::Ndjson => {
+                    let client = ensure_client().await?;
+                    let workspace_id = resolve_workspace_id(&client, &workspace).await?;
+                    watch_events_ndjson(&client, &workspace_id, from).await?;
+                }
+                EventTransport::Stdio => {
+                    watch_events_stdio(&workspace, from, mpd_path, db).await?;
+                }
+            },
         },
     }
 
@@ -168,7 +197,10 @@ async fn daemon_status(json: bool) -> anyhow::Result<()> {
             if json {
                 print_json(&resp)?;
             } else {
-                println!("daemon: {} (version {} @ {})", resp.status, resp.version, resp.timestamp);
+                println!(
+                    "daemon: {} (version {} @ {})",
+                    resp.status, resp.version, resp.timestamp
+                );
             }
         }
         Err(err) => {
@@ -221,7 +253,7 @@ async fn resolve_workspace_id(client: &Client, selector: &str) -> anyhow::Result
     ))
 }
 
-async fn watch_events(client: &Client, workspace_id: &str, from: i64) -> anyhow::Result<()> {
+async fn watch_events_sse(client: &Client, workspace_id: &str, from: i64) -> anyhow::Result<()> {
     let resp = client.events_stream(workspace_id, from).await?;
     let mut stream = resp.bytes_stream();
     let mut buffer = String::new();
@@ -241,6 +273,82 @@ async fn watch_events(client: &Client, workspace_id: &str, from: i64) -> anyhow:
         }
     }
     Ok(())
+}
+
+async fn watch_events_ndjson(client: &Client, workspace_id: &str, from: i64) -> anyhow::Result<()> {
+    let resp = client.events_stream_ndjson(workspace_id, from).await?;
+    let mut stream = resp.bytes_stream();
+    let mut buffer = String::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        let text = String::from_utf8_lossy(&chunk);
+        buffer.push_str(&text);
+        while let Some(pos) = buffer.find('\n') {
+            let line = buffer[..pos].trim_end().to_string();
+            buffer = buffer[pos + 1..].to_string();
+            if !line.is_empty() {
+                println!("{line}");
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn watch_events_stdio(
+    workspace: &str,
+    from: i64,
+    mpd_path: Option<PathBuf>,
+    db: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    let mpd_path = mpd_path.unwrap_or_else(|| PathBuf::from("mpd"));
+    let mut client = StdioClient::spawn(&mpd_path, db, StdioAuthMode::None).await?;
+    let result = async {
+        let workspace_id = resolve_workspace_id_stdio(&mut client, workspace).await?;
+        client.subscribe_events(&workspace_id, from).await?;
+
+        loop {
+            tokio::select! {
+                event = client.next_event() => {
+                    let event = event?;
+                    let json = serde_json::to_string(&event)?;
+                    println!("{json}");
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+    .await;
+
+    let shutdown_result = client.shutdown().await;
+    if result.is_err() {
+        let _ = shutdown_result;
+        return result;
+    }
+    shutdown_result?;
+    result
+}
+
+async fn resolve_workspace_id_stdio(
+    client: &mut StdioClient,
+    selector: &str,
+) -> anyhow::Result<String> {
+    let workspaces = client.list_workspaces().await?;
+    if workspaces.iter().any(|ws| ws.workspace_id == selector) {
+        return Ok(selector.to_string());
+    }
+    let mut matches = workspaces
+        .iter()
+        .filter(|ws| ws.name == selector || ws.root_path == selector)
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        return Ok(matches.pop().unwrap().workspace_id.clone());
+    }
+    Err(anyhow::anyhow!(
+        "workspace not found or ambiguous: {selector}"
+    ))
 }
 
 fn print_workspaces(workspaces: &[WorkspaceListEntry]) {
@@ -270,4 +378,82 @@ fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(value)?;
     println!("{json}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_events_watch_defaults() {
+        let cli =
+            Cli::try_parse_from(["mpctl", "events", "watch", "--workspace", "w1"]).expect("parse");
+        match cli.command {
+            Commands::Events { command } => match command {
+                EventCommands::Watch {
+                    workspace,
+                    from,
+                    transport,
+                    mpd_path,
+                    db,
+                } => {
+                    assert_eq!(workspace, "w1");
+                    assert_eq!(from, 0);
+                    assert!(matches!(transport, EventTransport::Sse));
+                    assert!(mpd_path.is_none());
+                    assert!(db.is_none());
+                }
+            },
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parse_events_watch_ndjson() {
+        let cli = Cli::try_parse_from([
+            "mpctl",
+            "events",
+            "watch",
+            "--workspace",
+            "w1",
+            "--transport",
+            "ndjson",
+            "--from",
+            "5",
+        ])
+        .expect("parse");
+        match cli.command {
+            Commands::Events { command } => match command {
+                EventCommands::Watch {
+                    transport, from, ..
+                } => {
+                    assert!(matches!(transport, EventTransport::Ndjson));
+                    assert_eq!(from, 5);
+                }
+            },
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parse_events_watch_stdio() {
+        let cli = Cli::try_parse_from([
+            "mpctl",
+            "events",
+            "watch",
+            "--workspace",
+            "w1",
+            "--transport",
+            "stdio",
+        ])
+        .expect("parse");
+        match cli.command {
+            Commands::Events { command } => match command {
+                EventCommands::Watch { transport, .. } => {
+                    assert!(matches!(transport, EventTransport::Stdio));
+                }
+            },
+            _ => panic!("unexpected command"),
+        }
+    }
 }

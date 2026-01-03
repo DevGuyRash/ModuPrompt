@@ -32,7 +32,10 @@ pub trait ProjectionWriter {
     fn set_meta(&self, workspace_id: &str, seq_global: i64) -> Result<(), ProjectionError>;
 }
 
-pub fn apply_event<W: ProjectionWriter>(writer: &W, event: &EventEnvelope) -> Result<(), ProjectionError> {
+pub fn apply_event<W: ProjectionWriter>(
+    writer: &W,
+    event: &EventEnvelope,
+) -> Result<(), ProjectionError> {
     match event.event_type.as_str() {
         EVENT_WORKSPACE_CREATED => {
             let payload: WorkspaceCreatedPayload =
@@ -49,9 +52,10 @@ pub fn apply_event<W: ProjectionWriter>(writer: &W, event: &EventEnvelope) -> Re
             writer.set_meta(&event.workspace_id, event.seq_global)?;
         }
         EVENT_PROJECT_CREATED => {
-            let payload: ProjectCreatedPayload = from_value(event.payload.clone()).map_err(|err| {
-                ProjectionError::Apply(format!("invalid project.created payload: {err}"))
-            })?;
+            let payload: ProjectCreatedPayload =
+                from_value(event.payload.clone()).map_err(|err| {
+                    ProjectionError::Apply(format!("invalid project.created payload: {err}"))
+                })?;
             let project_id = event
                 .project_id
                 .as_ref()
@@ -82,4 +86,261 @@ where
         apply_event(writer, &event)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mp_kernel::{Actor, Subject};
+    use std::cell::{Cell, RefCell};
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct WorkspaceRecord {
+        workspace_id: String,
+        name: String,
+        root_path: String,
+        created_at: String,
+        seq_global: i64,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ProjectRecord {
+        project_id: String,
+        workspace_id: String,
+        name: String,
+        created_at: String,
+        seq_global: i64,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct MetaRecord {
+        workspace_id: String,
+        seq_global: i64,
+    }
+
+    #[derive(Default)]
+    struct RecordingWriter {
+        resets: Cell<usize>,
+        workspaces: RefCell<Vec<WorkspaceRecord>>,
+        projects: RefCell<Vec<ProjectRecord>>,
+        metas: RefCell<Vec<MetaRecord>>,
+    }
+
+    impl ProjectionWriter for RecordingWriter {
+        fn reset(&self) -> Result<(), ProjectionError> {
+            self.resets.set(self.resets.get() + 1);
+            self.workspaces.borrow_mut().clear();
+            self.projects.borrow_mut().clear();
+            self.metas.borrow_mut().clear();
+            Ok(())
+        }
+
+        fn upsert_workspace(
+            &self,
+            workspace_id: &str,
+            name: &str,
+            root_path: &str,
+            created_at: &str,
+            seq_global: i64,
+        ) -> Result<(), ProjectionError> {
+            self.workspaces.borrow_mut().push(WorkspaceRecord {
+                workspace_id: workspace_id.to_string(),
+                name: name.to_string(),
+                root_path: root_path.to_string(),
+                created_at: created_at.to_string(),
+                seq_global,
+            });
+            Ok(())
+        }
+
+        fn upsert_project(
+            &self,
+            project_id: &str,
+            workspace_id: &str,
+            name: &str,
+            created_at: &str,
+            seq_global: i64,
+        ) -> Result<(), ProjectionError> {
+            self.projects.borrow_mut().push(ProjectRecord {
+                project_id: project_id.to_string(),
+                workspace_id: workspace_id.to_string(),
+                name: name.to_string(),
+                created_at: created_at.to_string(),
+                seq_global,
+            });
+            Ok(())
+        }
+
+        fn set_meta(&self, workspace_id: &str, seq_global: i64) -> Result<(), ProjectionError> {
+            self.metas.borrow_mut().push(MetaRecord {
+                workspace_id: workspace_id.to_string(),
+                seq_global,
+            });
+            Ok(())
+        }
+    }
+
+    fn workspace_event(seq_global: i64) -> EventEnvelope {
+        EventEnvelope {
+            event_id: "e1".to_string(),
+            event_type: EVENT_WORKSPACE_CREATED.to_string(),
+            timestamp: "2020-01-01T00:00:00Z".to_string(),
+            actor: Actor::system(),
+            workspace_id: "w1".to_string(),
+            project_id: None,
+            subject: Subject {
+                kind: "workspace".to_string(),
+                id: "w1".to_string(),
+            },
+            payload: serde_json::json!({
+                "name": "demo",
+                "root_path": "/tmp/demo"
+            }),
+            schema_version: 1,
+            seq_global,
+            seq_stream: 1,
+            trace_id: None,
+        }
+    }
+
+    fn project_event(seq_global: i64) -> EventEnvelope {
+        EventEnvelope {
+            event_id: "e2".to_string(),
+            event_type: EVENT_PROJECT_CREATED.to_string(),
+            timestamp: "2020-01-01T00:00:00Z".to_string(),
+            actor: Actor::system(),
+            workspace_id: "w1".to_string(),
+            project_id: Some("p1".to_string()),
+            subject: Subject {
+                kind: "project".to_string(),
+                id: "p1".to_string(),
+            },
+            payload: serde_json::json!({
+                "workspace_id": "w1",
+                "name": "core"
+            }),
+            schema_version: 1,
+            seq_global,
+            seq_stream: 1,
+            trace_id: None,
+        }
+    }
+
+    #[test]
+    fn apply_event_records_workspace() {
+        let writer = RecordingWriter::default();
+        let event = workspace_event(3);
+        apply_event(&writer, &event).expect("apply event");
+
+        let workspaces = writer.workspaces.borrow();
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(
+            workspaces[0],
+            WorkspaceRecord {
+                workspace_id: "w1".to_string(),
+                name: "demo".to_string(),
+                root_path: "/tmp/demo".to_string(),
+                created_at: "2020-01-01T00:00:00Z".to_string(),
+                seq_global: 3,
+            }
+        );
+
+        let metas = writer.metas.borrow();
+        assert_eq!(metas.len(), 1);
+        assert_eq!(
+            metas[0],
+            MetaRecord {
+                workspace_id: "w1".to_string(),
+                seq_global: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn apply_event_records_project() {
+        let writer = RecordingWriter::default();
+        let event = project_event(7);
+        apply_event(&writer, &event).expect("apply event");
+
+        let projects = writer.projects.borrow();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(
+            projects[0],
+            ProjectRecord {
+                project_id: "p1".to_string(),
+                workspace_id: "w1".to_string(),
+                name: "core".to_string(),
+                created_at: "2020-01-01T00:00:00Z".to_string(),
+                seq_global: 7,
+            }
+        );
+
+        let metas = writer.metas.borrow();
+        assert_eq!(metas.len(), 1);
+        assert_eq!(
+            metas[0],
+            MetaRecord {
+                workspace_id: "w1".to_string(),
+                seq_global: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn apply_event_rejects_invalid_payload() {
+        let writer = RecordingWriter::default();
+        let mut event = workspace_event(1);
+        event.payload = serde_json::json!({
+            "name": "demo"
+        });
+
+        let result = apply_event(&writer, &event);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn apply_event_requires_project_id() {
+        let writer = RecordingWriter::default();
+        let mut event = project_event(2);
+        event.project_id = None;
+
+        let result = apply_event(&writer, &event);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rebuild_resets_and_applies() {
+        let writer = RecordingWriter::default();
+        let events = vec![workspace_event(1), project_event(2)];
+        let result = rebuild_projections(&writer, events);
+        assert!(result.is_ok());
+        assert_eq!(writer.resets.get(), 1);
+        assert_eq!(writer.workspaces.borrow().len(), 1);
+        assert_eq!(writer.projects.borrow().len(), 1);
+    }
+
+    #[test]
+    fn rebuild_ignores_unknown_events() {
+        let writer = RecordingWriter::default();
+        let event = EventEnvelope {
+            event_id: "e2".to_string(),
+            event_type: "unknown.event".to_string(),
+            timestamp: "2020-01-01T00:00:00Z".to_string(),
+            actor: Actor::system(),
+            workspace_id: "w1".to_string(),
+            project_id: None,
+            subject: Subject {
+                kind: "unknown".to_string(),
+                id: "x1".to_string(),
+            },
+            payload: serde_json::json!({}),
+            schema_version: 1,
+            seq_global: 1,
+            seq_stream: 1,
+            trace_id: None,
+        };
+
+        let result = rebuild_projections(&writer, vec![event]);
+        assert!(result.is_ok());
+    }
 }

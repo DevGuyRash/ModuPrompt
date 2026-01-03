@@ -14,6 +14,7 @@ Start from the top and go deeper only as needed.
 
 - `03_kernel_contract.md` — command + event envelopes, IDs, ordering, versioning, concurrency
 - `kernel/04_event_model.md` — event store, projections, replay, tamper evidence, audit stream
+- `kernel/transport.md` — daemon transport layer (SSE, NDJSON, stdio)
 
 ## 2) Orchestration semantics (the MVP)
 
@@ -90,6 +91,11 @@ All PRDs live in `context/prd/`:
 - Multiplayer/Collab
 - CLI/TUI
 - Storage & Deployment Profiles
+
+## 13) Contributor & review guidance
+
+- `../AGENTS.md` — contributor instructions (mindset, doc rules, Rust coding guidelines, PR workflow)
+- `../styleguide.md` — code review style guide (checklists, severity labels, reviewer expectations)
 
 ## Reference registry
 

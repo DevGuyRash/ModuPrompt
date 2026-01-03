@@ -67,6 +67,44 @@ pub struct CommandRejection {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StdioFrame {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(rename = "type")]
+    pub frame_type: String,
+    pub schema_version: i32,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StdioErrorPayload {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StdioAuthPayload {
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StdioProjectsQuery {
+    pub workspace_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StdioEventsSubscribe {
+    pub workspace_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<i64>,
+}
+
 #[derive(Debug)]
 pub struct SchemaRegistry {
     command_schemas: HashMap<(String, i32), Value>,
@@ -192,10 +230,43 @@ impl SchemaRegistry {
 #[cfg(test)]
 mod tests {
     use super::SchemaRegistry;
+    use serde_json::json;
 
     #[test]
     fn schemas_compile() {
         let registry = SchemaRegistry::new();
         assert!(registry.is_ok());
+    }
+
+    #[test]
+    fn command_schema_rejects_unknown_fields() {
+        let registry = SchemaRegistry::new().expect("registry");
+        let payload = json!({
+            "name": "demo",
+            "path": "./demo",
+            "extra": "nope"
+        });
+        let result = registry.validate_command_payload("workspace.create", 1, &payload);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn event_schema_rejects_unknown_fields() {
+        let registry = SchemaRegistry::new().expect("registry");
+        let payload = json!({
+            "name": "demo",
+            "root_path": "./demo",
+            "extra": true
+        });
+        let result = registry.validate_event_payload("workspace.created", 1, &payload);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn command_schema_requires_fields() {
+        let registry = SchemaRegistry::new().expect("registry");
+        let payload = json!({});
+        let result = registry.validate_command_payload("workspace.create", 1, &payload);
+        assert!(result.is_err());
     }
 }

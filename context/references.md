@@ -8,6 +8,8 @@ This is the **single canonical** registry of external references.
 
 - [rfc-9562] RFC 9562 — Universally Unique IDentifiers (UUIDs) (incl. UUIDv7)
 - [rfc-9106] RFC 9106 — Argon2 memory-hard function (password hashing / KDF guidance)
+- [rfc-8895] RFC 8895 — Server-Sent Events (SSE)
+- [ndjson-spec] NDJSON — Newline Delimited JSON specification
 - [json-schema-spec] JSON Schema — Specification (2020-12)
 
 ## Storage / Messaging
@@ -46,6 +48,8 @@ This is the **single canonical** registry of external references.
 
 [rfc-9562]: https://www.rfc-editor.org/rfc/rfc9562.html "RFC 9562: Universally Unique IDentifiers (UUIDs)"
 [rfc-9106]: https://datatracker.ietf.org/doc/rfc9106/ "RFC 9106: Argon2 Memory-Hard Function for Password Hashing"
+[rfc-8895]: https://www.rfc-editor.org/rfc/rfc8895.html "RFC 8895: Server-Sent Events"
+[ndjson-spec]: https://github.com/ndjson/ndjson-spec "NDJSON Specification"
 [json-schema-spec]: https://json-schema.org/specification "JSON Schema Specification"
 
 [sqlite-when-to-use]: https://sqlite.org/whentouse.html "Appropriate Uses For SQLite"

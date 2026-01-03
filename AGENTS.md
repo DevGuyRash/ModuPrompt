@@ -4,6 +4,8 @@ You are working on ModuPrompt as a **strategic architecture + product partner**.
 
 This repo is **docs-first**: correctness, determinism, security, and invariants are locked before scaffolding implementation.
 
+> For **code review checklists** and reviewer severity labels, see `styleguide.md`.
+
 ## 0) Golden rule
 
 > **Do not break canonical invariants.**
@@ -102,7 +104,21 @@ If a proposed feature cannot be expressed in those terms, it likely violates the
 
 ## 8) Pull request workflow
 
-- When opening a pull request, include `@codex` in the PR description to trigger automated review.
+- When opening a pull request, include both `@codex` and `@gemini-code-assist` (separate lines; at the end of the PR description) to trigger automated review.
+- If you script PR bodies/comments, make sure newlines render as real line breaks (not literal `\n`): prefer `gh pr create --body-file ...` or `gh pr view --template '{{.body}}'` (or `--json body --jq '.body'`) when reading.
+- Commit and PR text should be human-readable; when multi-line bodies are intended, ensure they use real line breaks (avoid literal `\n` in the rendered text).
+
+### Treating automated reviewer feedback
+
+> **Important:** `@codex` and `@gemini-code-assist` are **not** the source of truth.
+
+Treat their comments like reviews from a helpful but inexperienced junior developer:
+
+1. **Verify before acting.** Their suggestions may be incorrect, outdated, or miss project-specific context. Cross-check against the canonical docs (`context/00_invariants.md`, `context/03_kernel_contract.md`, etc.) and actual codebase behavior.
+2. **Do not blindly apply changes.** If a suggestion conflicts with project invariants or conventions, it is wrong—regardless of how confident the bot sounds.
+3. **If a claim is inaccurate, do not proceed.** Respond directly in the PR thread explaining why the suggestion is incorrect. **Do NOT tag the bots again** in your reply (tagging triggers another review cycle and creates noise).
+4. **If a suggestion is valid and you make changes:** Reply in the **same thread** (not a new top-level comment) to keep context together. **Do tag the bot again** so it can verify the fix was applied correctly.
+5. **Useful for catching:** typos, obvious bugs, missing tests, style drift. Less reliable for: architectural decisions, invariant enforcement, security boundaries.
 
 
 ## Mandatory Rust Coding Guidelines
