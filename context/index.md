@@ -69,7 +69,11 @@ Start from the top and go deeper only as needed.
 
 - `roadmap.md` — phased delivery
 
-## 11) Future capabilities (captured vision)
+## 11) Validation
+
+- `validation/issue_002_hello_world.md` — hello-world kernel validation (Issue #2)
+
+## 12) Future capabilities (captured vision)
 
 - `future/context_engineering_mode.md` — prompt graph + diagram objects + templating syntax
 
