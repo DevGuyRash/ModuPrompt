@@ -264,6 +264,57 @@ async fn schema_failure_rejects_with_error_code() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn unknown_query_fields_reject() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let db_path = temp.path().join("mpd.sqlite");
+    let runtime_dir = temp.path().join("run");
+
+    let config = DaemonConfig {
+        db_path,
+        addr: "127.0.0.1:0".parse::<SocketAddr>()?,
+        runtime_dir: runtime_dir.clone(),
+        safe_mode: false,
+    };
+
+    let handle = tokio::spawn(run_daemon(config));
+    let client = wait_for_client(&runtime_dir).await?;
+    let create = client
+        .workspace_create("demo".to_string(), Some("./demo".to_string()), None, None)
+        .await?;
+    let workspace_id = create.events[0].workspace_id.clone();
+    let info = read_runtime_info(&runtime_dir).await?;
+
+    let events_url = format!(
+        "{}/v1/events?workspace_id={workspace_id}&from=0&bogus=true",
+        info.addr
+    );
+    let events_resp = reqwest::Client::new()
+        .get(events_url)
+        .header(AUTHORIZATION, format!("Bearer {}", info.token))
+        .send()
+        .await?;
+    assert_eq!(events_resp.status(), StatusCode::BAD_REQUEST);
+    let events_error: ErrorResponse = events_resp.json().await?;
+    assert_eq!(events_error.code, ErrorCode::InvalidSchema);
+
+    let projects_url = format!(
+        "{}/v1/projects?workspace_id={workspace_id}&bogus=true",
+        info.addr
+    );
+    let projects_resp = reqwest::Client::new()
+        .get(projects_url)
+        .header(AUTHORIZATION, format!("Bearer {}", info.token))
+        .send()
+        .await?;
+    assert_eq!(projects_resp.status(), StatusCode::BAD_REQUEST);
+    let projects_error: ErrorResponse = projects_resp.json().await?;
+    assert_eq!(projects_error.code, ErrorCode::InvalidSchema);
+
+    handle.abort();
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn event_stream_catches_up() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let db_path = temp.path().join("mpd.sqlite");
