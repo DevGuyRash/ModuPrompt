@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/mp-dirs",
   "crates/mp-kernel",
   "crates/mp-protocol",
   "crates/mp-storage",
@@ -22,6 +23,7 @@ axum = { version = "0.7", default-features = false, features = ["json", "tokio",
 base64 = "0.22"
 blake3 = "1.5"
 clap = { version = "4.5", features = ["derive"] }
+directories = "5.0"
 futures = "0.3"
 jsonschema = "0.17"
 rand = "0.8"

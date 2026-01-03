@@ -56,6 +56,12 @@ jobs:
         if: ${{ steps.cargo.outputs.present == 'true' }}
         working-directory: ${{ steps.cargo.outputs.dir }}
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Cargo deny
+        if: ${{ steps.cargo.outputs.present == 'true' }}
+        working-directory: ${{ steps.cargo.outputs.dir }}
+        run: |
+          cargo install cargo-deny --locked
+          cargo deny check --workspace --all-features
       - name: Rust tests
         if: ${{ steps.cargo.outputs.present == 'true' }}
         working-directory: ${{ steps.cargo.outputs.dir }}

@@ -101,6 +101,34 @@ mpctl project create --workspace ./my-workspace --name core
 mpctl session spawn --project core --blueprint ./agents/blueprints/reviewer.yaml
 ```
 
+## Runtime layout (config/data/runtime)
+
+ModuPrompt resolves platform directories via `crates/mp-dirs` (BaseDirs) and appends a single `moduprompt` segment to each base path. If platform APIs are unavailable, it falls back to `~/.moduprompt`.
+
+- **config_dir**: stable configuration files
+- **data_dir**: persistent data (event log, projections, artifacts)
+- **state_dir**: `${data_dir}/state` (SQLite DB: `mpd.sqlite`)
+- **runtime_dir**: OS runtime dir when available (e.g., `$XDG_RUNTIME_DIR/moduprompt`), otherwise `${data_dir}/run`
+- **runtime file**: `${runtime_dir}/daemon.json` (daemon connection info + token)
+
+Examples (defaults):
+- **Linux**:
+  - config: `$XDG_CONFIG_HOME/moduprompt` (default `~/.config/moduprompt`)
+  - data: `$XDG_DATA_HOME/moduprompt` (default `~/.local/share/moduprompt`)
+  - runtime: `$XDG_RUNTIME_DIR/moduprompt` (fallback: `~/.local/share/moduprompt/run`)
+- **macOS**:
+  - config: `~/Library/Preferences/moduprompt`
+  - data: `~/Library/Application Support/moduprompt`
+  - runtime: `~/Library/Application Support/moduprompt/run`
+- **Windows**:
+  - config: `%APPDATA%\\moduprompt`
+  - data: `%LOCALAPPDATA%\\moduprompt`
+  - runtime: `%LOCALAPPDATA%\\moduprompt\\run`
+
+Overrides:
+- `mpd start --db <path>` overrides the default DB path
+- `mpd start --runtime-dir <path>` overrides the runtime dir
+
 ## Docs map
 
 Start here:

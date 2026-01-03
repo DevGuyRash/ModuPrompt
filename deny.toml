@@ -1,0 +1,26 @@
+[advisories]
+vulnerability = "deny"
+unmaintained = "warn"
+unsound = "deny"
+notice = "warn"
+
+[licenses]
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-DFS-2016",
+  "CC0-1.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
