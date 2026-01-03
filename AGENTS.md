@@ -127,7 +127,7 @@ Before starting any work, you MUST create a new branch:
 
 ### Treating automated reviewer feedback
 
-> **Important:** `@codex` and `@gemini-code-assist` are **not** the source of truth.
+> **Important:** `@codex`, `@gemini-code-assist`, and any code review at all are **not** the source of truth.
 
 Treat their comments like reviews from a helpful but inexperienced junior developer:
 

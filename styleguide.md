@@ -97,6 +97,43 @@
 - [ ] `cargo fmt`, `cargo clippy -D warnings`, `cargo test`, `cargo deny` are clean.
 - [ ] `cargo bench` for perf-sensitive changes (if applicable).
 
+### G) Context & specification compliance (dynamic check)
+
+> **Mandatory for every review.** The `context/` directory and `AGENTS.md` are living documents. Reviewers must verify the code follows them and check if any need updating.
+
+#### G.1) Verify code follows documented guidelines
+
+1. **Identify affected domains** from the diff (e.g., kernel, security, storage, tooling, agent, UI).
+2. **Scan `context/` subdirectories** matching those domains:
+   - `context/*.md` — top-level specs (invariants, glossary, architecture, kernel contract)
+   - `context/{domain}/*.md` — domain-specific specs (e.g., `context/security/`, `context/tooling/`)
+   - `context/prd/` — PRDs that may define requirements for the feature
+3. **Check `AGENTS.md`** for workflow requirements (TDD, commit conventions, PR process).
+4. **Flag violations** — if the code violates a documented requirement, flag as BLOCKER or MAJOR.
+
+```bash
+# Example: list context files relevant to a kernel change
+find context -name '*.md' | grep -E '(kernel|00_invariants|03_kernel)' | head -20
+```
+
+#### G.2) Check if any context files need updating
+
+For changes that introduce or modify:
+- Commands, events, or wire formats → check `context/03_kernel_contract.md`, `context/kernel/`
+- Security behavior, policy, or permissions → check `context/security/`
+- Tools, schemas, or side-effect taxonomy → check `context/tooling/`
+- Agent behavior, hooks, or capsules → check `context/agent/`
+- Storage or projection logic → check `context/storage/`
+- New concepts or terminology → check `context/01_glossary.md`
+- Architectural changes → check `context/02_architecture_overview.md`, `AGENTS.md`
+- README-worthy features → check `README.md`
+
+- [ ] Scanned `context/` for files relevant to this change.
+- [ ] Verified the code follows documented specs and invariants.
+- [ ] Checked whether any context files need updating due to this change.
+- [ ] Checked whether `AGENTS.md` needs updating due to this change.
+- [ ] Checked whether `README.md` needs updating due to this change.
+
 ---
 
 ## Rust style & correctness expectations (summary)
