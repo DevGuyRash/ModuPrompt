@@ -260,7 +260,11 @@ impl StdioClient {
         };
 
         if let StdioAuthMode::Token(token) = auth {
-            client.auth(token).await?;
+            if let Err(err) = client.auth(token).await {
+                let _ = client.child.kill().await;
+                let _ = client.child.wait().await;
+                return Err(err);
+            }
         }
 
         Ok(client)
