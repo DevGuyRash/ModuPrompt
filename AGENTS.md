@@ -103,6 +103,8 @@ If a proposed feature cannot be expressed in those terms, it likely violates the
 ## 8) Pull request workflow
 
 - When opening a pull request, include `@codex` in the PR description to trigger automated review.
+- If you script PR bodies/comments, make sure newlines render as real line breaks (not literal `\n`): prefer `gh pr create --body-file ...` or `gh pr view --template '{{.body}}'` (or `--json body --jq '.body'`) when reading.
+- Commit and PR text should be human-readable; when multi-line bodies are intended, ensure they use real line breaks (avoid literal `\n` in the rendered text).
 
 
 ## Mandatory Rust Coding Guidelines
