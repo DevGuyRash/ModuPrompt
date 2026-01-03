@@ -92,6 +92,11 @@ All PRDs live in `context/prd/`:
 - CLI/TUI
 - Storage & Deployment Profiles
 
+## 13) Contributor & review guidance
+
+- `../AGENTS.md` — contributor instructions (mindset, doc rules, Rust coding guidelines, PR workflow)
+- `../styleguide.md` — code review style guide (checklists, severity labels, reviewer expectations)
+
 ## Reference registry
 
 - `references.md` — canonical link registry used across docs
