@@ -35,9 +35,7 @@ impl SqliteStore {
                  ORDER BY workspace_id, seq_global",
             )
             .map_err(map_sql_err)?;
-        let events_iter = stmt
-            .query_map([], |row| row_to_event(row))
-            .map_err(map_sql_err)?;
+        let events_iter = stmt.query_map([], row_to_event).map_err(map_sql_err)?;
         let mut events = Vec::new();
         for event in events_iter {
             events.push(event.map_err(map_sql_err)?);
@@ -126,7 +124,7 @@ impl SqliteStore {
             )
             .map_err(map_sql_err)?;
         let events_iter = stmt
-            .query_map(params![workspace_id, first, last], |row| row_to_event(row))
+            .query_map(params![workspace_id, first, last], row_to_event)
             .map_err(map_sql_err)?;
         let mut events = Vec::new();
         for event in events_iter {
