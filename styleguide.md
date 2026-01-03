@@ -1,15 +1,18 @@
 # ModuPrompt Style & Code Review Guidelines
 
+**Status:** Canonical.
+
 > Canonical review + style guidance for **humans and AI reviewers**.
 > For deeper detail, also follow `AGENTS.md` and the contract/spec docs under `context/`.
+> See `AGENTS.md` § 8 for PR workflow (including required AI reviewers).
 
 ## Quick rules (priority order)
 
 1) **Do not break canonical invariants** (`context/00_invariants.md`).
-   - **Single-writer daemon** owns state. Clients (CLI/UI) must not write the DB directly.
-   - **Event log is truth**. Projections are derived and rebuildable.
-   - **Propose → Gate → Execute**. Agents propose; the kernel gates; only the kernel executes and records.
-   - **Deny-by-default security** (ABAC, no surprise network, no secrets in logs).
+   - **Invariant #1: Single-writer daemon** owns state. Clients (CLI/UI) must not write the DB directly.
+   - **Invariant #2: Event log is truth**. Projections are derived and rebuildable.
+   - **Invariant #3: Propose → Gate → Execute**. Agents propose; the kernel gates; only the kernel executes and records.
+   - **Invariant #8: Deny-by-default security** (ABAC, no surprise network, no secrets in logs).
 
 2) **Anything that changes state MUST go through:**
    - command payload schema validation (reject unknown fields),
@@ -23,8 +26,9 @@
    - Add characterization tests proving unknown fields are rejected.
 
 4) **Determinism & replay discipline**
-   - No “hidden” state. If replay needs it, capture it as an event field or artifact reference.
+   - No "hidden" state. If replay needs it, capture it as an event field or artifact reference.
    - Avoid `HashMap`/`HashSet` iteration where ordering affects persisted/output data; sort or use `BTree*`.
+   - Concurrency MUST NOT break event ordering guarantees (`seq_global` semantics).
 
 5) **Security & secrets**
    - Never log secret material; treat it as toxic.
@@ -35,6 +39,15 @@
    - For BLOCKER/MAJOR, suggest a concrete fix (pseudo‑diff or exact API change) and name the invariant it protects.
    - Prefer small, composable patches; avoid broad rewrites.
 
+### Severity definitions
+
+| Label | Meaning |
+|-------|---------|
+| **BLOCKER** | Violates a canonical invariant or introduces a security vulnerability. Must fix before merge. |
+| **MAJOR** | Breaks contract (schema, API), creates nondeterminism, or degrades security posture. Must fix before merge. |
+| **MINOR** | Style issues, test coverage gaps, or documentation omissions. Should fix, but non-blocking. |
+| **NIT** | Cosmetic or optional improvements. Author discretion. |
+
 ---
 
 ## Review checklist by change type
@@ -43,8 +56,10 @@
 
 - [ ] Payload schema added/updated in `schemas/**` (versioned, additive if possible).
 - [ ] Unknown fields rejected (schema + `deny_unknown_fields`).
+- [ ] Characterization test proving unknown fields are rejected.
 - [ ] Idempotency enforced for state-changing commands.
 - [ ] `expected_version` / conflict behavior tested if applicable.
+- [ ] `trace_id` propagation verified through event emission and tool execution.
 - [ ] Event(s) emitted are sufficient to rebuild projections deterministically.
 - [ ] Projections updated to handle new events, and rebuild remains idempotent.
 - [ ] Docs updated: `context/03_kernel_contract.md` and any referenced PRDs.
@@ -53,13 +68,14 @@
 
 - [ ] Projections are derived only from events; no extra sources of truth.
 - [ ] Rebuild works from a cold DB (drop projections → replay events).
-- [ ] Queries and outputs use stable ordering.
+- [ ] Queries and outputs use stable ordering (no `HashMap`/`HashSet` iteration affecting output).
 - [ ] Migrations are safe and tested (SQLite WAL where relevant).
 
 ### C) Tools / hooks / policy boundaries
 
-- [ ] Side-effecting behavior is a kernel tool (schema’d, gated, audited).
+- [ ] Side-effecting behavior is a kernel tool (schema'd, gated, audited).
 - [ ] Hooks fail closed; trust tiers respected (sandboxed vs trusted).
+- [ ] WASM sandbox hostcalls are minimal, capability-scoped, and emit events.
 - [ ] No new network capability without explicit allowlists + approvals.
 
 ### D) CLI / UI
@@ -68,10 +84,17 @@
 - [ ] JSON output is stable; exit codes are meaningful.
 - [ ] No direct DB writes; all via daemon API.
 
-### E) Docs & repo hygiene
+### E) Network / external calls
+
+- [ ] No new network capability without explicit allowlists + policy gating.
+- [ ] HTTP calls route via kernel tools (no ad-hoc HTTP in business logic).
+- [ ] Network-capable deps isolated behind feature flags.
+
+### F) Docs & repo hygiene
 
 - [ ] `python scripts/check_docs.py` passes (references and links).
 - [ ] `cargo fmt`, `cargo clippy -D warnings`, `cargo test`, `cargo deny` are clean.
+- [ ] `cargo bench` for perf-sensitive changes (if applicable).
 
 ---
 
@@ -80,4 +103,18 @@
 - No `unwrap()`/`expect()` in non-test code unless *provably impossible* (add invariant comment).
 - Prefer explicit error types; keep errors structured and non-leaky (no secrets, no full file contents).
 - Add tests for: happy path + rejection path (schema/policy/conflict).
+- Add characterization tests proving unknown fields are rejected for any public JSON surface.
 - Keep dependency bloat isolated behind crates/features; default desktop build stays lightweight.
+- Concurrency MUST NOT break event ordering guarantees (`seq_global` semantics).
+
+---
+
+## Key spec references
+
+For detailed requirements, see:
+
+- `context/00_invariants.md` — canonical non-negotiables
+- `context/03_kernel_contract.md` — command/event envelope structure
+- `context/kernel/04_event_model.md` — event store, projections, replay
+- `context/security/19_security_architecture.md` — ABAC, policy, audit
+- `context/tooling/12_tools_and_schemas.md` — tool contracts, side-effect taxonomy
