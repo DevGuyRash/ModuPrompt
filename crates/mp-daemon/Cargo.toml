@@ -36,3 +36,4 @@ uuid.workspace = true
 tempfile.workspace = true
 mp-client = { path = "../mp-client" }
 futures.workspace = true
+reqwest.workspace = true

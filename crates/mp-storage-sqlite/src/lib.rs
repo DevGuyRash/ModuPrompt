@@ -537,3 +537,170 @@ fn map_serde_err(err: serde_json::Error) -> StoreError {
 fn map_proj_err(err: ProjectionError) -> StoreError {
     StoreError::Internal(err.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mp_kernel::{
+        Actor, ProjectCreatedPayload, WorkspaceCreatedPayload, EVENT_PROJECT_CREATED,
+        EVENT_WORKSPACE_CREATED,
+    };
+    use mp_storage::{CommandMeta, NewEvent};
+    use rusqlite::Connection;
+    use tempfile::TempDir;
+
+    fn temp_store() -> (TempDir, SqliteStore) {
+        let dir = TempDir::new().expect("tempdir");
+        let db_path = dir.path().join("mpd.sqlite");
+        let store = SqliteStore::open(&db_path).expect("open store");
+        (dir, store)
+    }
+
+    fn command_meta(command_type: &str, idempotency_key: Option<&str>) -> CommandMeta {
+        CommandMeta {
+            command_type: command_type.to_string(),
+            idempotency_key: idempotency_key.map(|s| s.to_string()),
+            expected_version: None,
+            trace_id: "tr_test".to_string(),
+        }
+    }
+
+    fn workspace_event(workspace_id: &str, name: &str, root_path: &str) -> NewEvent {
+        NewEvent {
+            event_type: EVENT_WORKSPACE_CREATED.to_string(),
+            schema_version: 1,
+            actor: Actor::system(),
+            workspace_id: workspace_id.to_string(),
+            project_id: None,
+            subject: Subject {
+                kind: "workspace".to_string(),
+                id: workspace_id.to_string(),
+            },
+            payload: serde_json::to_value(WorkspaceCreatedPayload {
+                name: name.to_string(),
+                root_path: root_path.to_string(),
+            })
+            .expect("payload"),
+            trace_id: Some("tr_evt".to_string()),
+            stream_id: None,
+        }
+    }
+
+    fn project_event(
+        workspace_id: &str,
+        project_id: &str,
+        name: &str,
+    ) -> NewEvent {
+        NewEvent {
+            event_type: EVENT_PROJECT_CREATED.to_string(),
+            schema_version: 1,
+            actor: Actor::system(),
+            workspace_id: workspace_id.to_string(),
+            project_id: Some(project_id.to_string()),
+            subject: Subject {
+                kind: "project".to_string(),
+                id: project_id.to_string(),
+            },
+            payload: serde_json::to_value(ProjectCreatedPayload {
+                workspace_id: workspace_id.to_string(),
+                name: name.to_string(),
+            })
+            .expect("payload"),
+            trace_id: Some("tr_evt".to_string()),
+            stream_id: None,
+        }
+    }
+
+    #[test]
+    fn append_and_read_from_persists_events() {
+        let (_dir, mut store) = temp_store();
+        let meta = command_meta("workspace.create", None);
+        let events = vec![
+            workspace_event("w1", "alpha", "/tmp/alpha"),
+            project_event("w1", "p1", "core"),
+        ];
+
+        let result = store.append(&meta, events).expect("append");
+        assert_eq!(result.events.len(), 2);
+        assert!(!result.idempotent);
+        assert_eq!(result.events[0].seq_global, 1);
+        assert_eq!(result.events[1].seq_global, 2);
+        assert_eq!(result.events[0].workspace_id, "w1");
+        assert_eq!(result.events[1].workspace_id, "w1");
+        assert!(!result.events[0].event_id.is_empty());
+        assert!(!result.events[0].timestamp.is_empty());
+
+        let read = store.read_from("w1", 0, None).expect("read");
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].seq_global, 1);
+        assert_eq!(read[1].seq_global, 2);
+        assert_eq!(store.head_seq("w1").unwrap(), 2);
+    }
+
+    #[test]
+    fn append_idempotency_replays_events() {
+        let (_dir, mut store) = temp_store();
+        let meta = command_meta("workspace.create", Some("ik_test"));
+        let events = vec![workspace_event("w1", "alpha", "/tmp/alpha")];
+
+        let first = store.append(&meta, events).expect("append");
+        assert_eq!(first.events.len(), 1);
+        assert!(!first.idempotent);
+
+        let second = store
+            .append(&meta, vec![workspace_event("w1", "beta", "/tmp/beta")])
+            .expect("append idempotent");
+        assert!(second.idempotent);
+        assert_eq!(second.events.len(), 1);
+        assert_eq!(first.events[0].event_id, second.events[0].event_id);
+        assert_eq!(first.events[0].seq_global, second.events[0].seq_global);
+        assert_eq!(store.head_seq("w1").unwrap(), 1);
+    }
+
+    #[test]
+    fn read_from_respects_limit() {
+        let (_dir, mut store) = temp_store();
+        let meta = command_meta("workspace.create", None);
+        let events = vec![
+            workspace_event("w1", "alpha", "/tmp/alpha"),
+            project_event("w1", "p1", "core"),
+            project_event("w1", "p2", "api"),
+        ];
+        store.append(&meta, events).expect("append");
+
+        let read = store.read_from("w1", 1, Some(1)).expect("read");
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].seq_global, 2);
+    }
+
+    #[test]
+    fn projections_update_and_rebuild() {
+        let (dir, mut store) = temp_store();
+        let meta = command_meta("workspace.create", None);
+        let events = vec![
+            workspace_event("w1", "alpha", "/tmp/alpha"),
+            project_event("w1", "p1", "core"),
+        ];
+        store.append(&meta, events).expect("append");
+
+        let workspaces = store.list_workspaces().expect("workspaces");
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(workspaces[0].name, "alpha");
+
+        let projects = store.list_projects("w1").expect("projects");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].name, "core");
+
+        let db_path = dir.path().join("mpd.sqlite");
+        let conn = Connection::open(db_path).expect("conn");
+        conn.execute(
+            "UPDATE proj_workspaces SET name = ?1 WHERE workspace_id = ?2",
+            params!["corrupt", "w1"],
+        )
+        .expect("corrupt");
+
+        store.rebuild_projections().expect("rebuild");
+        let workspaces = store.list_workspaces().expect("workspaces");
+        assert_eq!(workspaces[0].name, "alpha");
+    }
+}

@@ -369,3 +369,59 @@ impl StdioClient {
 fn new_request_id() -> String {
     format!("rq_{}", Uuid::now_v7())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mp_kernel::RuntimeInfo;
+    use tempfile::TempDir;
+
+    #[test]
+    fn id_prefixes_are_applied() {
+        let idempotency = new_idempotency_key();
+        assert!(idempotency.starts_with("ik_"));
+        assert!(Uuid::parse_str(&idempotency[3..]).is_ok());
+
+        let trace = new_trace_id();
+        assert!(trace.starts_with("tr_"));
+        assert!(Uuid::parse_str(&trace[3..]).is_ok());
+
+        let request = new_request_id();
+        assert!(request.starts_with("rq_"));
+        assert!(Uuid::parse_str(&request[3..]).is_ok());
+    }
+
+    #[test]
+    fn auth_headers_include_bearer_token() {
+        let client = Client {
+            base_url: Url::parse("http://localhost:8080").expect("url"),
+            token: "secret".to_string(),
+            http: HttpClient::new(),
+        };
+        let headers = client.auth_headers();
+        let token = headers
+            .get(AUTHORIZATION)
+            .expect("authorization")
+            .to_str()
+            .expect("header str");
+        assert_eq!(token, "Bearer secret");
+    }
+
+    #[test]
+    fn from_runtime_dir_reads_runtime_file() {
+        let dir = TempDir::new().expect("tempdir");
+        let info = RuntimeInfo {
+            addr: "http://127.0.0.1:4242".to_string(),
+            token: "tok_test".to_string(),
+            pid: 123,
+            db_path: "/tmp/mpd.sqlite".to_string(),
+            started_at: "2020-01-01T00:00:00Z".to_string(),
+        };
+        let path = dir.path().join("daemon.json");
+        std::fs::write(&path, serde_json::to_vec(&info).expect("json")).expect("write");
+
+        let client = Client::from_runtime_dir(dir.path()).expect("client");
+        assert_eq!(client.token, "tok_test");
+        assert_eq!(client.base_url.as_str(), "http://127.0.0.1:4242/");
+    }
+}
