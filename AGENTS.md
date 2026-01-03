@@ -117,7 +117,8 @@ Treat their comments like reviews from a helpful but inexperienced junior develo
 1. **Verify before acting.** Their suggestions may be incorrect, outdated, or miss project-specific context. Cross-check against the canonical docs (`context/00_invariants.md`, `context/03_kernel_contract.md`, etc.) and actual codebase behavior.
 2. **Do not blindly apply changes.** If a suggestion conflicts with project invariants or conventions, it is wrong—regardless of how confident the bot sounds.
 3. **If a claim is inaccurate, do not proceed.** Respond directly in the PR thread explaining why the suggestion is incorrect. **Do NOT tag the bots again** in your reply (tagging triggers another review cycle and creates noise).
-4. **Useful for catching:** typos, obvious bugs, missing tests, style drift. Less reliable for: architectural decisions, invariant enforcement, security boundaries.
+4. **If a suggestion is valid and you make changes:** Reply in the **same thread** (not a new top-level comment) to keep context together. **Do tag the bot again** so it can verify the fix was applied correctly.
+5. **Useful for catching:** typos, obvious bugs, missing tests, style drift. Less reliable for: architectural decisions, invariant enforcement, security boundaries.
 
 
 ## Mandatory Rust Coding Guidelines
