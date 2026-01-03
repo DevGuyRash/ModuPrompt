@@ -7,6 +7,11 @@
     "request_id": { "type": ["string", "null"] },
     "type": { "type": "string" },
     "schema_version": { "type": "integer" },
-    "payload": { "type": "object" }
+    "payload": {
+      "oneOf": [
+        { "type": "object" },
+        { "type": "array" }
+      ]
+    }
   }
 }
