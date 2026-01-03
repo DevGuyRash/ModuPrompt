@@ -17,6 +17,7 @@ REF_LINK_RE = re.compile(r"\[([^\]]+)\]\[([^\]]*)\]")
 def iter_non_code_lines(text: str):
     in_fence = False
     fence = None
+    in_indented = False
     for line in text.splitlines():
         stripped = line.lstrip()
         if stripped.startswith("```") or stripped.startswith("~~~"):
@@ -28,8 +29,16 @@ def iter_non_code_lines(text: str):
                 in_fence = False
                 fence = None
             continue
-        if not in_fence:
-            yield line
+        if in_fence:
+            continue
+        if in_indented:
+            if line.startswith("    ") or line.startswith("\t"):
+                continue
+            in_indented = False
+        if line.startswith("    ") or line.startswith("\t"):
+            in_indented = True
+            continue
+        yield line
 
 
 def load_canonical_labels() -> set[str]:

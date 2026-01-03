@@ -16,11 +16,33 @@ jobs:
         id: cargo
         shell: bash
         run: |
+          set -euo pipefail
           if [ -f Cargo.toml ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "dir=." >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          mapfile -t candidates < <(find . -maxdepth 4 -name Cargo.toml -type f | sort)
+          if [ ${#candidates[@]} -eq 0 ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          workspace=""
+          for file in "${candidates[@]}"; do
+            if grep -q "^[[:space:]]*\\[workspace\\]" "$file"; then
+              workspace="$file"
+              break
+            fi
+          done
+
+          if [ -z "$workspace" ]; then
+            workspace="${candidates[0]}"
+          fi
+
+          echo "present=true" >> "$GITHUB_OUTPUT"
+          echo "dir=$(dirname "$workspace")" >> "$GITHUB_OUTPUT"
       - name: Install Rust toolchain
         if: ${{ steps.cargo.outputs.present == 'true' }}
         uses: dtolnay/rust-toolchain@stable
@@ -28,12 +50,15 @@ jobs:
           components: rustfmt, clippy
       - name: Rust fmt
         if: ${{ steps.cargo.outputs.present == 'true' }}
+        working-directory: ${{ steps.cargo.outputs.dir }}
         run: cargo fmt --all -- --check
       - name: Rust clippy
         if: ${{ steps.cargo.outputs.present == 'true' }}
+        working-directory: ${{ steps.cargo.outputs.dir }}
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Rust tests
         if: ${{ steps.cargo.outputs.present == 'true' }}
+        working-directory: ${{ steps.cargo.outputs.dir }}
         run: cargo test --workspace --all-features
 
   docs:
