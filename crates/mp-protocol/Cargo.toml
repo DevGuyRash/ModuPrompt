@@ -1,0 +1,12 @@
+[package]
+name = "mp-protocol"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+jsonschema.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+mp-kernel = { path = "../mp-kernel" }
