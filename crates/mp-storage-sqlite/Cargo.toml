@@ -2,6 +2,7 @@
 name = "mp-storage-sqlite"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [dependencies]
 mp-kernel = { path = "../mp-kernel" }
