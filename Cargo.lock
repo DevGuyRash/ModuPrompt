@@ -1164,6 +1164,7 @@ dependencies = [
  "futures",
  "mp-client",
  "mp-kernel",
+ "mp-protocol",
  "serde",
  "serde_json",
  "tokio",

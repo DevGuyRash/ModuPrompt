@@ -1,8 +1,9 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 use futures::StreamExt;
-use mp_client::{Client, StdioAuthMode, StdioClient};
-use mp_kernel::{ProjectListEntry, WorkspaceListEntry};
+use mp_client::{Client, ClientError, StdioAuthMode, StdioClient};
+use mp_kernel::{ErrorCode, ProjectListEntry, WorkspaceListEntry};
+use mp_protocol::{CommandRejection, ErrorResponse, SubmitCommandResponse};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tokio::time::{sleep, Duration};
@@ -95,10 +96,129 @@ enum EventTransport {
     Stdio,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+#[derive(Debug, Clone)]
+struct CliError {
+    error: ErrorResponse,
+}
 
+impl CliError {
+    fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            error: ErrorResponse {
+                code,
+                message: message.into(),
+                details: None,
+                trace_id: None,
+            },
+        }
+    }
+
+    fn from_error_response(error: ErrorResponse) -> Self {
+        Self { error }
+    }
+
+    fn from_rejection(rejection: CommandRejection, trace_id: String) -> Self {
+        Self {
+            error: ErrorResponse {
+                code: rejection.code,
+                message: rejection.message,
+                details: None,
+                trace_id: Some(trace_id),
+            },
+        }
+    }
+}
+
+impl std::fmt::Display for CliError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.error.code, self.error.message)
+    }
+}
+
+impl std::error::Error for CliError {}
+
+impl From<anyhow::Error> for CliError {
+    fn from(err: anyhow::Error) -> Self {
+        if let Some(client_error) = err.downcast_ref::<ClientError>() {
+            return CliError::from_error_response(client_error.error.clone());
+        }
+        CliError::new(ErrorCode::Unknown, err.to_string())
+    }
+}
+
+type CliResult<T> = Result<T, CliError>;
+
+fn exit_code_for_error_code(code: ErrorCode) -> i32 {
+    match code {
+        ErrorCode::InvalidSchema
+        | ErrorCode::ValidationFailed
+        | ErrorCode::IdempotencyKeyRequired
+        | ErrorCode::UnknownCommand => 2,
+        ErrorCode::ExpectedVersionMismatch => 3,
+        ErrorCode::Unauthorized => 4,
+        ErrorCode::NotFound => 5,
+        ErrorCode::PolicyDenied => 6,
+        ErrorCode::Unknown | ErrorCode::Internal => 1,
+    }
+}
+
+fn wants_json(cli: &Cli) -> bool {
+    match &cli.command {
+        Commands::Daemon {
+            command: DaemonCommands::Status { json },
+        } => *json,
+        Commands::Workspace {
+            command: WorkspaceCommands::List { json },
+        } => *json,
+        Commands::Project {
+            command: ProjectCommands::List { json, .. },
+        } => *json,
+        _ => false,
+    }
+}
+
+fn render_error(err: &CliError, json: bool) {
+    if json {
+        match serde_json::to_string_pretty(&err.error) {
+            Ok(payload) => println!("{payload}"),
+            Err(_) => println!(
+                "{{\"code\":\"{}\",\"message\":\"{}\"}}",
+                err.error.code, err.error.message
+            ),
+        }
+        return;
+    }
+
+    eprintln!("{}: {}", err.error.code, err.error.message);
+    if let Some(trace_id) = &err.error.trace_id {
+        eprintln!("trace_id: {trace_id}");
+    }
+}
+
+fn ensure_command_accepted(response: SubmitCommandResponse) -> CliResult<SubmitCommandResponse> {
+    if response.accepted {
+        return Ok(response);
+    }
+    if let Some(rejection) = response.rejection {
+        return Err(CliError::from_rejection(rejection, response.trace_id));
+    }
+    Err(CliError::new(
+        ErrorCode::Unknown,
+        "command rejected without details",
+    ))
+}
+
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+    let json = wants_json(&cli);
+    if let Err(err) = run(cli).await {
+        render_error(&err, json);
+        std::process::exit(exit_code_for_error_code(err.error.code));
+    }
+}
+
+async fn run(cli: Cli) -> CliResult<()> {
     match cli.command {
         Commands::Daemon { command } => match command {
             DaemonCommands::Start => {
@@ -119,6 +239,7 @@ async fn main() -> anyhow::Result<()> {
                 let response = client
                     .workspace_create(resolved_name, Some(path.display().to_string()), None, None)
                     .await?;
+                let response = ensure_command_accepted(response)?;
                 print_json(&response)?;
             }
             WorkspaceCommands::List { json } => {
@@ -138,6 +259,7 @@ async fn main() -> anyhow::Result<()> {
                 let response = client
                     .project_create(workspace_id, name, None, None)
                     .await?;
+                let response = ensure_command_accepted(response)?;
                 print_json(&response)?;
             }
             ProjectCommands::List { workspace, json } => {
@@ -179,7 +301,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn start_daemon() -> anyhow::Result<()> {
+fn start_daemon() -> CliResult<()> {
     let child = Command::new("mpd")
         .arg("start")
         .stdout(Stdio::null())
@@ -190,7 +312,7 @@ fn start_daemon() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn daemon_status(json: bool) -> anyhow::Result<()> {
+async fn daemon_status(json: bool) -> CliResult<()> {
     match try_client().await {
         Ok(client) => {
             let resp = client.ping().await?;
@@ -214,7 +336,7 @@ async fn daemon_status(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn ensure_client() -> anyhow::Result<Client> {
+async fn ensure_client() -> CliResult<Client> {
     if let Ok(client) = try_client().await {
         return Ok(client);
     }
@@ -226,17 +348,17 @@ async fn ensure_client() -> anyhow::Result<Client> {
             return Ok(client);
         }
     }
-    Err(anyhow::anyhow!("daemon failed to start"))
+    Err(CliError::new(ErrorCode::Unknown, "daemon failed to start"))
 }
 
-async fn try_client() -> anyhow::Result<Client> {
+async fn try_client() -> CliResult<Client> {
     let runtime_dir = Client::default_runtime_dir();
     let client = Client::from_runtime_dir(&runtime_dir)?;
     client.ping().await?;
     Ok(client)
 }
 
-async fn resolve_workspace_id(client: &Client, selector: &str) -> anyhow::Result<String> {
+async fn resolve_workspace_id(client: &Client, selector: &str) -> CliResult<String> {
     let workspaces = client.workspace_list().await?;
     if workspaces.iter().any(|ws| ws.workspace_id == selector) {
         return Ok(selector.to_string());
@@ -248,17 +370,18 @@ async fn resolve_workspace_id(client: &Client, selector: &str) -> anyhow::Result
     if matches.len() == 1 {
         return Ok(matches.pop().unwrap().workspace_id.clone());
     }
-    Err(anyhow::anyhow!(
-        "workspace not found or ambiguous: {selector}"
+    Err(CliError::new(
+        ErrorCode::NotFound,
+        format!("workspace not found or ambiguous: {selector}"),
     ))
 }
 
-async fn watch_events_sse(client: &Client, workspace_id: &str, from: i64) -> anyhow::Result<()> {
+async fn watch_events_sse(client: &Client, workspace_id: &str, from: i64) -> CliResult<()> {
     let resp = client.events_stream(workspace_id, from).await?;
     let mut stream = resp.bytes_stream();
     let mut buffer = String::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
+        let chunk = chunk.map_err(|err| CliError::new(ErrorCode::Unknown, err.to_string()))?;
         let text = String::from_utf8_lossy(&chunk);
         buffer.push_str(&text);
         while let Some(pos) = buffer.find('\n') {
@@ -275,12 +398,12 @@ async fn watch_events_sse(client: &Client, workspace_id: &str, from: i64) -> any
     Ok(())
 }
 
-async fn watch_events_ndjson(client: &Client, workspace_id: &str, from: i64) -> anyhow::Result<()> {
+async fn watch_events_ndjson(client: &Client, workspace_id: &str, from: i64) -> CliResult<()> {
     let resp = client.events_stream_ndjson(workspace_id, from).await?;
     let mut stream = resp.bytes_stream();
     let mut buffer = String::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
+        let chunk = chunk.map_err(|err| CliError::new(ErrorCode::Unknown, err.to_string()))?;
         let text = String::from_utf8_lossy(&chunk);
         buffer.push_str(&text);
         while let Some(pos) = buffer.find('\n') {
@@ -299,7 +422,7 @@ async fn watch_events_stdio(
     from: i64,
     mpd_path: Option<PathBuf>,
     db: Option<PathBuf>,
-) -> anyhow::Result<()> {
+) -> CliResult<()> {
     let mpd_path = mpd_path.unwrap_or_else(|| PathBuf::from("mpd"));
     let mut client = StdioClient::spawn(&mpd_path, db, StdioAuthMode::None).await?;
     let result = async {
@@ -310,7 +433,8 @@ async fn watch_events_stdio(
             tokio::select! {
                 event = client.next_event() => {
                     let event = event?;
-                    let json = serde_json::to_string(&event)?;
+                    let json = serde_json::to_string(&event)
+                        .map_err(|err| CliError::new(ErrorCode::Unknown, err.to_string()))?;
                     println!("{json}");
                 }
                 _ = tokio::signal::ctrl_c() => {
@@ -331,10 +455,7 @@ async fn watch_events_stdio(
     result
 }
 
-async fn resolve_workspace_id_stdio(
-    client: &mut StdioClient,
-    selector: &str,
-) -> anyhow::Result<String> {
+async fn resolve_workspace_id_stdio(client: &mut StdioClient, selector: &str) -> CliResult<String> {
     let workspaces = client.list_workspaces().await?;
     if workspaces.iter().any(|ws| ws.workspace_id == selector) {
         return Ok(selector.to_string());
@@ -346,8 +467,9 @@ async fn resolve_workspace_id_stdio(
     if matches.len() == 1 {
         return Ok(matches.pop().unwrap().workspace_id.clone());
     }
-    Err(anyhow::anyhow!(
-        "workspace not found or ambiguous: {selector}"
+    Err(CliError::new(
+        ErrorCode::NotFound,
+        format!("workspace not found or ambiguous: {selector}"),
     ))
 }
 
@@ -374,8 +496,9 @@ fn print_projects(projects: &[ProjectListEntry]) {
     }
 }
 
-fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
-    let json = serde_json::to_string_pretty(value)?;
+fn print_json<T: serde::Serialize>(value: &T) -> CliResult<()> {
+    let json = serde_json::to_string_pretty(value)
+        .map_err(|err| CliError::new(ErrorCode::Unknown, err.to_string()))?;
     println!("{json}");
     Ok(())
 }
@@ -383,6 +506,7 @@ fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mp_kernel::ErrorCode;
 
     #[test]
     fn parse_events_watch_defaults() {
@@ -455,5 +579,25 @@ mod tests {
             },
             _ => panic!("unexpected command"),
         }
+    }
+
+    #[test]
+    fn exit_code_mapping_is_stable() {
+        assert_eq!(exit_code_for_error_code(ErrorCode::InvalidSchema), 2);
+        assert_eq!(exit_code_for_error_code(ErrorCode::ValidationFailed), 2);
+        assert_eq!(
+            exit_code_for_error_code(ErrorCode::IdempotencyKeyRequired),
+            2
+        );
+        assert_eq!(exit_code_for_error_code(ErrorCode::UnknownCommand), 2);
+        assert_eq!(
+            exit_code_for_error_code(ErrorCode::ExpectedVersionMismatch),
+            3
+        );
+        assert_eq!(exit_code_for_error_code(ErrorCode::Unauthorized), 4);
+        assert_eq!(exit_code_for_error_code(ErrorCode::NotFound), 5);
+        assert_eq!(exit_code_for_error_code(ErrorCode::PolicyDenied), 6);
+        assert_eq!(exit_code_for_error_code(ErrorCode::Unknown), 1);
+        assert_eq!(exit_code_for_error_code(ErrorCode::Internal), 1);
     }
 }

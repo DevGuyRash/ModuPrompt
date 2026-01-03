@@ -1,17 +1,19 @@
 use anyhow::Context;
 use mp_dirs::runtime_dir as default_runtime_dir_impl;
 use mp_kernel::{
-    DaemonPingResponse, ProjectCreatePayload, ProjectListEntry, RuntimeInfo,
+    DaemonPingResponse, ErrorCode, ProjectCreatePayload, ProjectListEntry, RuntimeInfo,
     WorkspaceCreatePayload, WorkspaceListEntry,
 };
 use mp_protocol::{
-    CommandEnvelope, StdioAuthPayload, StdioErrorPayload, StdioEventsSubscribe, StdioFrame,
-    StdioProjectsQuery, SubmitCommandResponse,
+    CommandEnvelope, ErrorResponse, StdioAuthPayload, StdioErrorPayload, StdioEventsSubscribe,
+    StdioFrame, StdioProjectsQuery, SubmitCommandResponse,
 };
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
-use reqwest::{Client as HttpClient, Response};
+use reqwest::{Client as HttpClient, Response, StatusCode};
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::VecDeque;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -24,6 +26,19 @@ pub struct Client {
     token: String,
     http: HttpClient,
 }
+
+#[derive(Debug, Clone)]
+pub struct ClientError {
+    pub error: ErrorResponse,
+}
+
+impl fmt::Display for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.error.code, self.error.message)
+    }
+}
+
+impl std::error::Error for ClientError {}
 
 impl Client {
     pub fn from_runtime_dir(runtime_dir: &Path) -> anyhow::Result<Self> {
@@ -50,9 +65,8 @@ impl Client {
             .get(url)
             .headers(self.auth_headers())
             .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
+            .await?;
+        parse_response(resp).await
     }
 
     pub async fn workspace_create(
@@ -98,9 +112,8 @@ impl Client {
             .get(url)
             .headers(self.auth_headers())
             .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
+            .await?;
+        parse_response(resp).await
     }
 
     pub async fn project_list(&self, workspace_id: &str) -> anyhow::Result<Vec<ProjectListEntry>> {
@@ -112,9 +125,8 @@ impl Client {
             .get(url)
             .headers(self.auth_headers())
             .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
+            .await?;
+        parse_response(resp).await
     }
 
     pub async fn events_read_from(
@@ -130,9 +142,8 @@ impl Client {
             .get(url)
             .headers(self.auth_headers())
             .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
+            .await?;
+        parse_response(resp).await
     }
 
     pub async fn events_stream(&self, workspace_id: &str, from: i64) -> anyhow::Result<Response> {
@@ -144,9 +155,12 @@ impl Client {
             .get(url)
             .headers(self.auth_headers())
             .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp)
+            .await?;
+        if resp.status().is_success() {
+            Ok(resp)
+        } else {
+            Err(error_from_response(resp).await)
+        }
     }
 
     pub async fn events_stream_ndjson(
@@ -162,9 +176,12 @@ impl Client {
             .get(url)
             .headers(self.auth_headers())
             .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp)
+            .await?;
+        if resp.status().is_success() {
+            Ok(resp)
+        } else {
+            Err(error_from_response(resp).await)
+        }
     }
 
     fn auth_headers(&self) -> HeaderMap {
@@ -197,9 +214,8 @@ impl Client {
             .headers(self.auth_headers())
             .json(&envelope)
             .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
+            .await?;
+        parse_response(resp).await
     }
 }
 
@@ -370,7 +386,7 @@ impl StdioClient {
             let frame: StdioFrame = serde_json::from_str(trimmed)?;
             if frame.frame_type == "error" {
                 let payload: StdioErrorPayload = serde_json::from_value(frame.payload.clone())?;
-                return Err(anyhow::anyhow!(payload.message));
+                return Err(anyhow::Error::new(ClientError { error: payload }));
             }
             return Ok(frame);
         }
@@ -380,6 +396,39 @@ impl StdioClient {
 
 fn new_request_id() -> String {
     format!("rq_{}", Uuid::now_v7())
+}
+
+async fn parse_response<T: DeserializeOwned>(resp: Response) -> anyhow::Result<T> {
+    if resp.status().is_success() {
+        Ok(resp.json().await?)
+    } else {
+        Err(error_from_response(resp).await)
+    }
+}
+
+async fn error_from_response(resp: Response) -> anyhow::Error {
+    let status = resp.status();
+    let error = match resp.json::<ErrorResponse>().await {
+        Ok(err) => err,
+        Err(_) => ErrorResponse {
+            code: error_code_from_status(status),
+            message: format!("http error {status}"),
+            details: None,
+            trace_id: None,
+        },
+    };
+    anyhow::Error::new(ClientError { error })
+}
+
+fn error_code_from_status(status: StatusCode) -> ErrorCode {
+    match status {
+        StatusCode::BAD_REQUEST => ErrorCode::InvalidSchema,
+        StatusCode::UNAUTHORIZED => ErrorCode::Unauthorized,
+        StatusCode::FORBIDDEN => ErrorCode::PolicyDenied,
+        StatusCode::NOT_FOUND => ErrorCode::NotFound,
+        StatusCode::CONFLICT => ErrorCode::ExpectedVersionMismatch,
+        _ => ErrorCode::Unknown,
+    }
 }
 
 #[cfg(test)]
