@@ -235,34 +235,97 @@ Schemas are part of the product contract.
   - Command handling SHOULD propagate `trace_id` through event emission and tool execution paths.
   - Tool execution MUST emit intent/gated/executed events (or their equivalents) with stable linkage.
 
-### 7) Testing expectations (deterministic, hermetic)
+### 7) Testing expectations (deterministic, hermetic, test-first)
 
-- Tests SHOULD be deterministic and hermetic:
+- **Test-driven development is mandatory:**
+
+  - Write failing tests **before** implementing new functionality.
+  - The cycle is: Red (failing test) → Green (minimal implementation) → Refactor.
+  - For bug fixes: first write a test that reproduces the bug, then fix it.
+  - PRs adding features or fixes without corresponding tests MUST be rejected.
+
+- Tests MUST be deterministic and hermetic:
 
   - Use temp dirs and fixtures.
   - Avoid network in tests; if unavoidable for a specific tool, isolate it behind mocks/recordings and keep it out of default test runs.
+  - No flaky tests; if a test fails intermittently, fix or remove it.
+
+- Tests MUST be non-brittle (test behavior, not implementation):
+
+  - Avoid over-mocking; prefer real collaborators where practical.
+  - Don't assert on incidental details (exact error message wording, internal field names).
+  - Tests should survive refactoring if behavior is unchanged.
+
+- Tests MUST be readable and fast:
+
+  - Use clear arrange-act-assert structure.
+  - Use descriptive test names that explain the scenario.
+  - No network calls, no sleeps, no unnecessary I/O.
+
 - Minimum coverage expectations for new features:
 
   - At least one happy path test.
   - At least one meaningful rejection/error path test (e.g., policy deny, unknown field rejection, schema mismatch).
+  - Edge cases and boundary conditions covered.
   - For any public JSON surface, include a characterization test that proves unknown fields are rejected.
+
 - Prefer testing observable behavior:
 
   - For CLI: stdout/stderr, exit codes, JSON output shape.
   - For daemon/kernel: emitted events, projection updates, and idempotency behavior.
 
-### 8) Performance and scalability (without cleverness)
+### 8) Design principles (SOLID, DRY, KISS, YAGNI)
+
+- **SOLID principles are mandatory:**
+
+  - **S**ingle Responsibility: each module/struct/function has one reason to change.
+  - **O**pen/Closed: extend behavior via composition or traits, not by modifying existing code.
+  - **L**iskov Substitution: subtypes (trait impls) must be substitutable without breaking invariants.
+  - **I**nterface Segregation: prefer small, focused traits over monolithic ones.
+  - **D**ependency Inversion: depend on abstractions (traits), not concrete implementations; inject dependencies.
+
+- **DRY (Don't Repeat Yourself):**
+
+  - Extract shared logic into functions, traits, or modules.
+  - Avoid copy-paste code; if you see duplication, refactor.
+  - Exception: test code may repeat setup for clarity; prefer test fixtures over complex shared helpers.
+
+- **KISS (Keep It Simple, Stupid):**
+
+  - Choose the simplest solution that meets requirements.
+  - Avoid premature abstraction; add complexity only when justified by real needs.
+  - Readable code beats clever code.
+
+- **YAGNI (You Aren't Gonna Need It):**
+
+  - Do not implement features "just in case."
+  - Build for current requirements; refactor when new requirements emerge.
+
+### 9) Performance, complexity, and scalability
+
+- **Complexity analysis is required for non-trivial code:**
+
+  - Document time and space complexity for algorithms, data structures, and hot paths.
+  - Prefer O(1) or O(log n) over O(n); prefer O(n) over O(n²).
+  - Justify any O(n²) or worse algorithm with a comment explaining why it's acceptable (e.g., bounded input size).
+
+- **Space efficiency matters:**
+
+  - Avoid unbounded memory growth; use streaming or pagination for large data.
+  - Prefer iterators over collecting into intermediate `Vec`s when possible.
+  - Document memory bounds for caches and buffers.
 
 - Optimize for predictable performance, not microbench heroics:
 
   - Avoid O(n²) patterns in projections and board snapshot generation.
-  - Stream large logs/artifacts; don’t slurp entire outputs into memory unless bounded and justified.
+  - Stream large logs/artifacts; don't slurp entire outputs into memory unless bounded and justified.
+
 - Concurrency MUST not break ordering guarantees:
 
   - You MAY use concurrency for execution/tool running, but event append ordering MUST remain correct and reproducible (`seq_global` semantics).
   - Any concurrent processing that affects emitted events MUST be carefully structured so output ordering is deterministic.
 
-### 9) Unsafe code policy
+### 10) Unsafe code policy
 
 - Unsafe SHOULD be avoided by default.
 - If unsafe is required (FFI, low-level perf, runtime integration), it MUST be:
@@ -272,7 +335,7 @@ Schemas are part of the product contract.
   - covered by tests that exercise the unsafe boundary,
   - reviewed with a security mindset (assume hostile inputs).
 
-### 10) Cross-platform and “no runtime sprawl” constraints
+### 11) Cross-platform and "no runtime sprawl" constraints
 
 - Desktop/local-first MUST not require Node/Python/JVM runtimes.
 - OS-specific behavior MUST be gated and tested:

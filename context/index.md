@@ -94,8 +94,8 @@ All PRDs live in `context/prd/`:
 
 ## 13) Contributor & review guidance
 
-- `../AGENTS.md` — contributor instructions (mindset, doc rules, Rust coding guidelines, PR workflow)
-- `../styleguide.md` — code review style guide (checklists, severity labels, reviewer expectations)
+- `../AGENTS.md` — contributor instructions (mindset, doc rules, Rust coding guidelines, TDD, design principles, complexity analysis, PR workflow)
+- `../styleguide.md` — code review style guide (checklists, severity labels, test quality, reviewer expectations)
 
 ## Reference registry
 

@@ -5,6 +5,7 @@
 > Canonical review + style guidance for **humans and AI reviewers**.
 > For deeper detail, also follow `AGENTS.md` and the contract/spec docs under `context/`.
 > See `AGENTS.md` § 8 for PR workflow (including required AI reviewers).
+> See `AGENTS.md` § 7 for TDD requirements, § 8 for design principles (SOLID/DRY/KISS/YAGNI), § 9 for complexity analysis.
 
 ## Quick rules (priority order)
 
@@ -109,10 +110,39 @@
 
 ---
 
+## Test quality (reviewers verify)
+
+> For TDD workflow (Red-Green-Refactor), see `AGENTS.md` § 7.
+
+- [ ] Tests exist for new features and bug fixes (TDD: test written before fix).
+- [ ] Tests are **deterministic** and **hermetic** (no flaky tests).
+- [ ] Tests are **non-brittle**: test behavior, not implementation details.
+  - Avoid over-mocking; prefer real collaborators where practical.
+  - Don't assert on incidental details (exact error messages, internal field names).
+  - Tests should survive refactoring if behavior is unchanged.
+- [ ] Tests are **readable**: clear arrange-act-assert structure, descriptive names.
+- [ ] Tests are **fast**: no network, no sleeps, no unnecessary I/O.
+- [ ] Edge cases and error paths are covered, not just happy paths.
+
+---
+
+## Design principles & complexity (reviewers verify)
+
+> For full guidance, see `AGENTS.md` § 8 (SOLID/DRY/KISS/YAGNI) and § 9 (complexity).
+
+- [ ] Code follows **SOLID**, **DRY**, **KISS**, **YAGNI** principles.
+- [ ] Time and space complexity documented for non-trivial algorithms.
+- [ ] O(n²) or worse algorithms justified with bounded-input rationale.
+- [ ] No unbounded memory growth; streaming preferred for large data.
+- [ ] Iterators preferred over intermediate `Vec` allocations where practical.
+
+---
+
 ## Key spec references
 
 For detailed requirements, see:
 
+- `AGENTS.md` — TDD workflow (§ 7), design principles (§ 8), complexity analysis (§ 9)
 - `context/00_invariants.md` — canonical non-negotiables
 - `context/03_kernel_contract.md` — command/event envelope structure
 - `context/kernel/04_event_model.md` — event store, projections, replay
