@@ -102,7 +102,24 @@ Then propose:
 
 If a proposed feature cannot be expressed in those terms, it likely violates the kernel model.
 
-## 8) Pull request workflow
+## 8) Git branching workflow
+
+Before starting any work, you MUST create a new branch:
+
+1. **Always branch from `main`** (or the designated base branch for the task).
+2. **Use descriptive branch names** following the pattern:
+   - `feat/<short-description>` for new features
+   - `fix/<short-description>` for bug fixes
+   - `docs/<short-description>` for documentation changes
+   - `refactor/<short-description>` for refactoring
+   - `test/<short-description>` for test additions/changes
+3. **Never commit directly to `main`.**
+4. **Verify you are on the correct branch** before making changes:
+   ```bash
+   git checkout main && git pull && git checkout -b <branch-name>
+   ```
+
+## 9) Pull request workflow
 
 - When opening a pull request, include both `@codex` and `@gemini-code-assist` (separate lines; at the end of the PR description) to trigger automated review.
 - If you script PR bodies/comments, make sure newlines render as real line breaks (not literal `\n`): prefer `gh pr create --body-file ...` or `gh pr view --template '{{.body}}'` (or `--json body --jq '.body'`) when reading.
