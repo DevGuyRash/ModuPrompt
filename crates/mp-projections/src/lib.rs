@@ -94,12 +94,36 @@ mod tests {
     use mp_kernel::{Actor, Subject};
     use std::cell::{Cell, RefCell};
 
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct WorkspaceRecord {
+        workspace_id: String,
+        name: String,
+        root_path: String,
+        created_at: String,
+        seq_global: i64,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ProjectRecord {
+        project_id: String,
+        workspace_id: String,
+        name: String,
+        created_at: String,
+        seq_global: i64,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct MetaRecord {
+        workspace_id: String,
+        seq_global: i64,
+    }
+
     #[derive(Default)]
     struct RecordingWriter {
         resets: Cell<usize>,
-        workspaces: RefCell<Vec<(String, String, String, String, i64)>>,
-        projects: RefCell<Vec<(String, String, String, String, i64)>>,
-        metas: RefCell<Vec<(String, i64)>>,
+        workspaces: RefCell<Vec<WorkspaceRecord>>,
+        projects: RefCell<Vec<ProjectRecord>>,
+        metas: RefCell<Vec<MetaRecord>>,
     }
 
     impl ProjectionWriter for RecordingWriter {
@@ -119,13 +143,13 @@ mod tests {
             created_at: &str,
             seq_global: i64,
         ) -> Result<(), ProjectionError> {
-            self.workspaces.borrow_mut().push((
-                workspace_id.to_string(),
-                name.to_string(),
-                root_path.to_string(),
-                created_at.to_string(),
+            self.workspaces.borrow_mut().push(WorkspaceRecord {
+                workspace_id: workspace_id.to_string(),
+                name: name.to_string(),
+                root_path: root_path.to_string(),
+                created_at: created_at.to_string(),
                 seq_global,
-            ));
+            });
             Ok(())
         }
 
@@ -137,20 +161,21 @@ mod tests {
             created_at: &str,
             seq_global: i64,
         ) -> Result<(), ProjectionError> {
-            self.projects.borrow_mut().push((
-                project_id.to_string(),
-                workspace_id.to_string(),
-                name.to_string(),
-                created_at.to_string(),
+            self.projects.borrow_mut().push(ProjectRecord {
+                project_id: project_id.to_string(),
+                workspace_id: workspace_id.to_string(),
+                name: name.to_string(),
+                created_at: created_at.to_string(),
                 seq_global,
-            ));
+            });
             Ok(())
         }
 
         fn set_meta(&self, workspace_id: &str, seq_global: i64) -> Result<(), ProjectionError> {
-            self.metas
-                .borrow_mut()
-                .push((workspace_id.to_string(), seq_global));
+            self.metas.borrow_mut().push(MetaRecord {
+                workspace_id: workspace_id.to_string(),
+                seq_global,
+            });
             Ok(())
         }
     }
@@ -211,18 +236,24 @@ mod tests {
         assert_eq!(workspaces.len(), 1);
         assert_eq!(
             workspaces[0],
-            (
-                "w1".to_string(),
-                "demo".to_string(),
-                "/tmp/demo".to_string(),
-                "2020-01-01T00:00:00Z".to_string(),
-                3
-            )
+            WorkspaceRecord {
+                workspace_id: "w1".to_string(),
+                name: "demo".to_string(),
+                root_path: "/tmp/demo".to_string(),
+                created_at: "2020-01-01T00:00:00Z".to_string(),
+                seq_global: 3,
+            }
         );
 
         let metas = writer.metas.borrow();
         assert_eq!(metas.len(), 1);
-        assert_eq!(metas[0], ("w1".to_string(), 3));
+        assert_eq!(
+            metas[0],
+            MetaRecord {
+                workspace_id: "w1".to_string(),
+                seq_global: 3,
+            }
+        );
     }
 
     #[test]
@@ -235,18 +266,24 @@ mod tests {
         assert_eq!(projects.len(), 1);
         assert_eq!(
             projects[0],
-            (
-                "p1".to_string(),
-                "w1".to_string(),
-                "core".to_string(),
-                "2020-01-01T00:00:00Z".to_string(),
-                7
-            )
+            ProjectRecord {
+                project_id: "p1".to_string(),
+                workspace_id: "w1".to_string(),
+                name: "core".to_string(),
+                created_at: "2020-01-01T00:00:00Z".to_string(),
+                seq_global: 7,
+            }
         );
 
         let metas = writer.metas.borrow();
         assert_eq!(metas.len(), 1);
-        assert_eq!(metas[0], ("w1".to_string(), 7));
+        assert_eq!(
+            metas[0],
+            MetaRecord {
+                workspace_id: "w1".to_string(),
+                seq_global: 7,
+            }
+        );
     }
 
     #[test]
