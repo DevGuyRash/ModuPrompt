@@ -320,6 +320,7 @@ impl StdioClient {
     }
 
     pub async fn shutdown(mut self) -> anyhow::Result<()> {
+        // Best-effort cleanup: the child may already be gone.
         let _ = self.child.kill().await;
         let _ = self.child.wait().await;
         Ok(())
