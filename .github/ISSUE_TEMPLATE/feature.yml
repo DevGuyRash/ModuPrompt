@@ -1,0 +1,72 @@
+name: Feature
+description: Propose a new feature (commands/events/projections/policies).
+title: "Feature: <short summary>"
+labels:
+  - type/feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for scoped feature work. Tie the work to core invariants and relevant `context/` specs.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-sentence description of the feature.
+      placeholder: "Add <capability> so <user> can <goal>."
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What's in and out of scope? Keep it crisp.
+      placeholder: |
+        In scope:
+        - ...
+        Out of scope:
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: deliverables
+    attributes:
+      label: Deliverables
+      description: Concrete outputs (code, schemas, docs, tests).
+      placeholder: "- ..."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Objective checks that prove the feature is done.
+      placeholder: "- ..."
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation / tests
+      description: How will this be validated? CI, tests, manual steps.
+      placeholder: "- ..."
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Spec references
+      description: Link the relevant `context/` docs and PRDs.
+      placeholder: "- context/..."
+    validations:
+      required: true
+  - type: checkboxes
+    id: triage
+    attributes:
+      label: Triage
+      description: Remember to apply taxonomy labels.
+      options:
+        - label: Add a priority label (P0/P1/P2)
+          required: false
+        - label: Add one or more area/* labels
+          required: false

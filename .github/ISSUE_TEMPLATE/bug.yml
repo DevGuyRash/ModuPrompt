@@ -1,0 +1,69 @@
+name: Bug
+description: Report a defect in behavior or documentation.
+title: "Bug: <short summary>"
+labels:
+  - type/bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for defects. Include repro steps and expected vs actual behavior.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-sentence description of the bug.
+      placeholder: "When <action>, <unexpected behavior> occurs."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: "Describe the expected outcome."
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: "Describe the actual outcome."
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Provide a minimal, deterministic repro.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Version, environment, logs, or other relevant details.
+      placeholder: "..."
+    validations:
+      required: false
+  - type: textarea
+    id: references
+    attributes:
+      label: Spec references
+      description: Link the relevant `context/` docs or invariants.
+      placeholder: "- context/..."
+    validations:
+      required: false
+  - type: checkboxes
+    id: triage
+    attributes:
+      label: Triage
+      description: Remember to apply taxonomy labels.
+      options:
+        - label: Add a priority label (P0/P1/P2)
+          required: false
+        - label: Add one or more area/* labels
+          required: false

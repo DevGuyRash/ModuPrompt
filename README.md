@@ -67,6 +67,16 @@ Implementation planning lives in:
 
 - `context/roadmap.md` — phased delivery goals
 
+## Project hygiene (labels + milestones)
+
+We use a consistent issue taxonomy:
+
+- Type: `type/epic`, `type/feature`, `type/bug`, `type/chore`, `type/spike`, `type/security`
+- Priority: `P0`, `P1`, `P2`
+- Area: `area/*` (full list in `gh_issues.md`)
+
+Milestones track the delivery phases (Phase 1 through Phase 7). See `gh_issues.md` for the current phase naming.
+
 ## Quickstart (target interface)
 
 These commands describe the intended developer UX (exact binaries will be implemented as the repo scaffolds):
