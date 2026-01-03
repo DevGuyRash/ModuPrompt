@@ -302,24 +302,33 @@ async fn watch_events_stdio(
 ) -> anyhow::Result<()> {
     let mpd_path = mpd_path.unwrap_or_else(|| PathBuf::from("mpd"));
     let mut client = StdioClient::spawn(&mpd_path, db, StdioAuthMode::None).await?;
-    let workspace_id = resolve_workspace_id_stdio(&mut client, workspace).await?;
-    client.subscribe_events(&workspace_id, from).await?;
+    let result = async {
+        let workspace_id = resolve_workspace_id_stdio(&mut client, workspace).await?;
+        client.subscribe_events(&workspace_id, from).await?;
 
-    loop {
-        tokio::select! {
-            event = client.next_event() => {
-                let event = event?;
-                let json = serde_json::to_string(&event)?;
-                println!("{json}");
-            }
-            _ = tokio::signal::ctrl_c() => {
-                break;
+        loop {
+            tokio::select! {
+                event = client.next_event() => {
+                    let event = event?;
+                    let json = serde_json::to_string(&event)?;
+                    println!("{json}");
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    break;
+                }
             }
         }
+        Ok(())
     }
+    .await;
 
-    client.shutdown().await?;
-    Ok(())
+    let shutdown_result = client.shutdown().await;
+    if result.is_err() {
+        let _ = shutdown_result;
+        return result;
+    }
+    shutdown_result?;
+    result
 }
 
 async fn resolve_workspace_id_stdio(
