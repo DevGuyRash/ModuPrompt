@@ -121,6 +121,25 @@ Before starting any work, you MUST create a new branch:
 
 ## 9) Pull request workflow
 
+### 9.1 Link related issues
+
+Before creating a PR, check for related issues and link them:
+
+1. **Search for relevant issues:**
+   ```bash
+   gh issue list --search "keyword"
+   gh issue list --label "bug"
+   ```
+2. **Link issues in the PR body** using closing keywords (GitHub will auto-close the issue when the PR merges):
+   - `Closes #123` — general completion
+   - `Fixes #123` — bug fixes
+   - `Resolves #123` — alternative syntax
+3. **For issues that are related but not fully resolved**, reference without closing keywords:
+   - `Related to #123`
+   - `Part of #123`
+
+### 9.2 PR description and reviewers
+
 - When opening a pull request, include both `@codex` and `@gemini-code-assist` (separate lines; at the end of the PR description) to trigger automated review.
 - If you script PR bodies/comments, make sure newlines render as real line breaks (not literal `\n`): prefer `gh pr create --body-file ...` or `gh pr view --template '{{.body}}'` (or `--json body --jq '.body'`) when reading.
 - Commit and PR text should be human-readable; when multi-line bodies are intended, ensure they use real line breaks (avoid literal `\n` in the rendered text).
