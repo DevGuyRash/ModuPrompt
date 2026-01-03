@@ -32,7 +32,10 @@ pub trait ProjectionWriter {
     fn set_meta(&self, workspace_id: &str, seq_global: i64) -> Result<(), ProjectionError>;
 }
 
-pub fn apply_event<W: ProjectionWriter>(writer: &W, event: &EventEnvelope) -> Result<(), ProjectionError> {
+pub fn apply_event<W: ProjectionWriter>(
+    writer: &W,
+    event: &EventEnvelope,
+) -> Result<(), ProjectionError> {
     match event.event_type.as_str() {
         EVENT_WORKSPACE_CREATED => {
             let payload: WorkspaceCreatedPayload =
@@ -49,9 +52,10 @@ pub fn apply_event<W: ProjectionWriter>(writer: &W, event: &EventEnvelope) -> Re
             writer.set_meta(&event.workspace_id, event.seq_global)?;
         }
         EVENT_PROJECT_CREATED => {
-            let payload: ProjectCreatedPayload = from_value(event.payload.clone()).map_err(|err| {
-                ProjectionError::Apply(format!("invalid project.created payload: {err}"))
-            })?;
+            let payload: ProjectCreatedPayload =
+                from_value(event.payload.clone()).map_err(|err| {
+                    ProjectionError::Apply(format!("invalid project.created payload: {err}"))
+                })?;
             let project_id = event
                 .project_id
                 .as_ref()

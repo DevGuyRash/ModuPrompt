@@ -377,8 +377,8 @@ mod tests {
 
     #[test]
     fn parse_events_watch_defaults() {
-        let cli = Cli::try_parse_from(["mpctl", "events", "watch", "--workspace", "w1"])
-            .expect("parse");
+        let cli =
+            Cli::try_parse_from(["mpctl", "events", "watch", "--workspace", "w1"]).expect("parse");
         match cli.command {
             Commands::Events { command } => match command {
                 EventCommands::Watch {
@@ -415,7 +415,9 @@ mod tests {
         .expect("parse");
         match cli.command {
             Commands::Events { command } => match command {
-                EventCommands::Watch { transport, from, .. } => {
+                EventCommands::Watch {
+                    transport, from, ..
+                } => {
                     assert!(matches!(transport, EventTransport::Ndjson));
                     assert_eq!(from, 5);
                 }

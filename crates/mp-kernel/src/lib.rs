@@ -180,7 +180,10 @@ mod tests {
 
     #[test]
     fn command_kind_classifies() {
-        assert_eq!(command_kind(COMMAND_DAEMON_PING), Some(CommandKind::ReadOnly));
+        assert_eq!(
+            command_kind(COMMAND_DAEMON_PING),
+            Some(CommandKind::ReadOnly)
+        );
         assert_eq!(
             command_kind(COMMAND_WORKSPACE_CREATE),
             Some(CommandKind::StateChanging)
@@ -192,7 +195,10 @@ mod tests {
     fn error_code_display_matches_wire_format() {
         assert_eq!(ErrorCode::InvalidSchema.to_string(), "invalid_schema");
         assert_eq!(ErrorCode::UnknownCommand.to_string(), "unknown_command");
-        assert_eq!(ErrorCode::IdempotencyKeyRequired.to_string(), "idempotency_key_required");
+        assert_eq!(
+            ErrorCode::IdempotencyKeyRequired.to_string(),
+            "idempotency_key_required"
+        );
         assert_eq!(
             ErrorCode::ExpectedVersionMismatch.to_string(),
             "expected_version_mismatch"

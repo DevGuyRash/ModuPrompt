@@ -43,7 +43,11 @@ pub enum StoreError {
 }
 
 pub trait EventStore {
-    fn append(&mut self, meta: &CommandMeta, events: Vec<NewEvent>) -> Result<AppendResult, StoreError>;
+    fn append(
+        &mut self,
+        meta: &CommandMeta,
+        events: Vec<NewEvent>,
+    ) -> Result<AppendResult, StoreError>;
     fn read_from(
         &self,
         workspace_id: &str,

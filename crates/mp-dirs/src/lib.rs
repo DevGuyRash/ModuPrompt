@@ -149,14 +149,8 @@ mod tests {
         let _lock = env_lock().lock().expect("lock");
         let _guard = EnvGuard::set(Some("/tmp/mp_home"), None);
         let (config_dir, data_dir) = fallback_dirs();
-        assert_eq!(
-            config_dir,
-            PathBuf::from("/tmp/mp_home/.moduprompt/config")
-        );
-        assert_eq!(
-            data_dir,
-            PathBuf::from("/tmp/mp_home/.moduprompt/data")
-        );
+        assert_eq!(config_dir, PathBuf::from("/tmp/mp_home/.moduprompt/config"));
+        assert_eq!(data_dir, PathBuf::from("/tmp/mp_home/.moduprompt/data"));
     }
 
     #[test]

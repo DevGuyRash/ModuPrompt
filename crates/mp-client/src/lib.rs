@@ -268,10 +268,7 @@ impl StdioClient {
         command: CommandEnvelope,
     ) -> anyhow::Result<SubmitCommandResponse> {
         let payload = serde_json::to_value(command)?;
-        let response = self
-            .request("command.submit", payload)
-            .await?
-            .payload;
+        let response = self.request("command.submit", payload).await?.payload;
         Ok(serde_json::from_value(response)?)
     }
 

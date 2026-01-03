@@ -1,6 +1,6 @@
 use mp_kernel::{now_rfc3339, Actor, ProjectListEntry, Subject, WorkspaceListEntry};
-use mp_protocol::EventEnvelope;
 use mp_projections::{apply_event, rebuild_projections, ProjectionError, ProjectionWriter};
+use mp_protocol::EventEnvelope;
 use mp_storage::{AppendResult, CommandMeta, EventStore, NewEvent, ProjectionReader, StoreError};
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
 use serde_json::Value;
@@ -16,9 +16,8 @@ pub struct SqliteStore {
 impl SqliteStore {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| {
-                StoreError::Internal(format!("failed to create db dir: {err}"))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|err| StoreError::Internal(format!("failed to create db dir: {err}")))?;
         }
         let conn = Connection::open(path)
             .map_err(|err| StoreError::Internal(format!("failed to open db: {err}")))?;
@@ -56,10 +55,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    fn current_seq_in_tx(
-        tx: &Transaction<'_>,
-        workspace_id: &str,
-    ) -> Result<i64, StoreError> {
+    fn current_seq_in_tx(tx: &Transaction<'_>, workspace_id: &str) -> Result<i64, StoreError> {
         let seq: Option<i64> = tx
             .query_row(
                 "SELECT MAX(seq_global) FROM events WHERE workspace_id = ?1",
@@ -141,7 +137,11 @@ impl SqliteStore {
 }
 
 impl EventStore for SqliteStore {
-    fn append(&mut self, meta: &CommandMeta, events: Vec<NewEvent>) -> Result<AppendResult, StoreError> {
+    fn append(
+        &mut self,
+        meta: &CommandMeta,
+        events: Vec<NewEvent>,
+    ) -> Result<AppendResult, StoreError> {
         if events.is_empty() {
             return Ok(AppendResult {
                 events: Vec::new(),
@@ -431,7 +431,9 @@ struct SqliteProjectionWriterConn<'a> {
 impl ProjectionWriter for SqliteProjectionWriterConn<'_> {
     fn reset(&self) -> Result<(), ProjectionError> {
         self.conn
-            .execute_batch("DELETE FROM proj_workspaces; DELETE FROM proj_projects; DELETE FROM proj_meta;")
+            .execute_batch(
+                "DELETE FROM proj_workspaces; DELETE FROM proj_projects; DELETE FROM proj_meta;",
+            )
             .map_err(|err| ProjectionError::Apply(err.to_string()))?;
         Ok(())
     }
@@ -502,10 +504,12 @@ struct IdempotencyRecord {
 fn row_to_event(row: &Row<'_>) -> Result<EventEnvelope, rusqlite::Error> {
     let actor_json: String = row.get(7)?;
     let payload_json: String = row.get(12)?;
-    let actor: Actor = serde_json::from_str(&actor_json)
-        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(err)))?;
-    let payload: Value = serde_json::from_str(&payload_json)
-        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(err)))?;
+    let actor: Actor = serde_json::from_str(&actor_json).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(err))
+    })?;
+    let payload: Value = serde_json::from_str(&payload_json).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(err))
+    })?;
 
     Ok(EventEnvelope {
         workspace_id: row.get(0)?,
@@ -586,11 +590,7 @@ mod tests {
         }
     }
 
-    fn project_event(
-        workspace_id: &str,
-        project_id: &str,
-        name: &str,
-    ) -> NewEvent {
+    fn project_event(workspace_id: &str, project_id: &str, name: &str) -> NewEvent {
         NewEvent {
             event_type: EVENT_PROJECT_CREATED.to_string(),
             schema_version: 1,

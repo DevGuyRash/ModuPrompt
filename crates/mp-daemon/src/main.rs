@@ -1,5 +1,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use mp_daemon::{default_db_path, default_runtime_dir, run_daemon, run_stdio, DaemonConfig, StdioAuth, StdioConfig};
+use mp_daemon::{
+    default_db_path, default_runtime_dir, run_daemon, run_stdio, DaemonConfig, StdioAuth,
+    StdioConfig,
+};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -70,7 +73,8 @@ async fn main() -> anyhow::Result<()> {
             let auth = match auth {
                 AuthMode::None => StdioAuth::None,
                 AuthMode::Token => {
-                    let token = token.ok_or_else(|| anyhow::anyhow!("--token required for auth=token"))?;
+                    let token =
+                        token.ok_or_else(|| anyhow::anyhow!("--token required for auth=token"))?;
                     StdioAuth::Token(token)
                 }
             };
