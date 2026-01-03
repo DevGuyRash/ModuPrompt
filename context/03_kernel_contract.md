@@ -111,9 +111,11 @@ Events are immutable records emitted by the daemon.
 
 ## 6) Realtime streaming
 
-- The daemon exposes event streams to clients (WS/SSE).
+- The daemon exposes event streams to clients via multiple transports (SSE, NDJSON, stdio).
 - Realtime is best-effort; durability comes from the event store.
 - Clients MUST be able to resync from the event log using sequence cursors.
+
+See `kernel/transport.md` for transport layer details.
 
 ---
 

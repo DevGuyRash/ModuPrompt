@@ -26,7 +26,9 @@ Provide a first-class CLI that can operate the entire system headlessly, suitabl
 - `mpctl session spawn|fork|list`
 - `mpctl worktree create|list|delete|status|diff|commit`
 - `mpctl task create|list|advance|cancel|retry`
-- `mpctl events watch --json`
+- `mpctl events watch --json [--transport sse|ndjson|stdio]`
+
+See `kernel/transport.md` for transport layer details.
 
 ## 5) Non-functional requirements
 

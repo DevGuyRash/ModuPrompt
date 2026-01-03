@@ -73,6 +73,8 @@ Durability is guaranteed by:
 
 **Guarantee:** At-least-once delivery to clients, idempotent application by event ID/sequence.
 
+See `kernel/transport.md` for transport layer options (SSE, NDJSON, stdio).
+
 ## 7) Cluster profile note
 
 In cluster deployments:
