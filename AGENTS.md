@@ -99,3 +99,7 @@ Then propose:
   - new UI views
 
 If a proposed feature cannot be expressed in those terms, it likely violates the kernel model.
+
+## 8) Pull request workflow
+
+- When opening a pull request, include `@codex` in the PR description to trigger automated review.
