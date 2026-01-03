@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "message"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "invalid_schema",
+        "unknown_command",
+        "idempotency_key_required",
+        "expected_version_mismatch",
+        "validation_failed",
+        "unauthorized",
+        "not_found",
+        "policy_denied",
+        "unknown",
+        "internal"
+      ]
+    },
+    "message": { "type": "string" },
+    "details": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Optional structured details (empty object in v1)."
+    },
+    "trace_id": { "type": "string" }
+  }
+}
