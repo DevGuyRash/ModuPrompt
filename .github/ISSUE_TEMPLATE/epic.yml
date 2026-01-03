@@ -1,0 +1,74 @@
+name: Epic
+description: Multi-issue initiative with phased delivery.
+title: "Epic: <short summary>"
+labels:
+  - type/epic
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for cross-cutting initiatives that break down into multiple issues.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-sentence description of the epic.
+      placeholder: "Deliver <capability> across <areas>."
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What's in and out of scope for this epic?
+      placeholder: |
+        In scope:
+        - ...
+        Out of scope:
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: outcomes
+    attributes:
+      label: Outcomes / deliverables
+      description: Key outcomes and artifacts expected.
+      placeholder: "- ..."
+    validations:
+      required: true
+  - type: textarea
+    id: breakdown
+    attributes:
+      label: Work breakdown
+      description: List child issues (or placeholders) with rough order.
+      placeholder: |
+        - [ ] Issue XXX — ...
+        - [ ] Issue YYY — ...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Objective checks that prove the epic is done.
+      placeholder: "- ..."
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Spec references
+      description: Link the relevant `context/` docs and PRDs.
+      placeholder: "- context/..."
+    validations:
+      required: true
+  - type: checkboxes
+    id: triage
+    attributes:
+      label: Triage
+      description: Remember to apply taxonomy labels.
+      options:
+        - label: Add a priority label (P0/P1/P2)
+          required: false
+        - label: Add one or more area/* labels
+          required: false

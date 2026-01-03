@@ -1,0 +1,75 @@
+name: Security
+description: Security feature, control, or vulnerability.
+title: "Security: <short summary>"
+labels:
+  - type/security
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for security features, gaps, or vulnerabilities. Anchor to the security architecture.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-sentence description.
+      placeholder: "Enforce <control> to mitigate <risk>."
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk / threat model
+      description: Describe the threat, attack surface, and impact.
+      placeholder: |
+        - Threat actor:
+        - Attack surface:
+        - Impact:
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What's in and out of scope?
+      placeholder: |
+        In scope:
+        - ...
+        Out of scope:
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: controls
+    attributes:
+      label: Controls / mitigations
+      description: Required controls, policies, and enforcement points.
+      placeholder: "- ..."
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation / tests
+      description: How will the control be verified?
+      placeholder: "- ..."
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Spec references
+      description: Link the relevant `context/` docs and PRDs.
+      placeholder: "- context/security/..."
+    validations:
+      required: true
+  - type: checkboxes
+    id: triage
+    attributes:
+      label: Triage
+      description: Remember to apply taxonomy labels.
+      options:
+        - label: Add a priority label (P0/P1/P2)
+          required: false
+        - label: Add one or more area/* labels
+          required: false
