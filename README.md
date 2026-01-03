@@ -129,6 +129,17 @@ Overrides:
 - `mpd start --db <path>` overrides the default DB path
 - `mpd start --runtime-dir <path>` overrides the runtime dir
 
+## Transport options (events stream)
+
+- **SSE (default)**: `GET /v1/events/stream` → Server-Sent Events
+- **NDJSON (chunked HTTP)**: `GET /v1/events/stream-ndjson` → one JSON event per line
+- **Stdio**: `mpd serve-stdio` → line-delimited JSON frames over stdin/stdout
+
+CLI examples:
+- `mpctl events watch --transport sse --workspace demo --from 0`
+- `mpctl events watch --transport ndjson --workspace demo --from 0`
+- `mpctl events watch --transport stdio --workspace demo --from 0`
+
 ## Docs map
 
 Start here:

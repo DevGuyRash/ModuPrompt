@@ -1180,6 +1180,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tokio",
  "url",
  "uuid",
 ]
@@ -1192,6 +1193,7 @@ dependencies = [
  "async-stream",
  "axum",
  "base64 0.22.1",
+ "bytes",
  "clap",
  "futures",
  "mp-client",

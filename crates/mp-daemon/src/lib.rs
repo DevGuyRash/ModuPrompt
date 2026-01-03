@@ -1,28 +1,35 @@
 use axum::{
+    body::Body,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode},
-    response::{sse::Event, sse::Sse},
+    http::{header::CONTENT_TYPE, HeaderMap, StatusCode},
+    response::{sse::Event, sse::Sse, Response},
     Json,
 };
-use futures::StreamExt;
 use base64::Engine;
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use mp_dirs::{default_db_path as default_db_path_impl, runtime_dir as runtime_dir_impl};
 use mp_kernel::{
     command_kind, now_rfc3339, Actor, CommandKind, CommandRejectedPayload, DaemonPingResponse,
     ErrorCode, ProjectCreatePayload, RuntimeInfo, WorkspaceCreatePayload, EVENT_COMMAND_REJECTED,
     EVENT_PROJECT_CREATED, EVENT_WORKSPACE_CREATED,
 };
-use mp_protocol::{CommandEnvelope, CommandRejection, SchemaRegistry, SubmitCommandResponse};
+use mp_protocol::{
+    CommandEnvelope, CommandRejection, SchemaRegistry, StdioAuthPayload, StdioErrorPayload,
+    StdioEventsSubscribe, StdioFrame, StdioProjectsQuery, SubmitCommandResponse,
+};
 use mp_storage::{CommandMeta, EventStore, NewEvent, ProjectionReader};
 use mp_storage_sqlite::SqliteStore;
 use rand::RngCore;
 use serde::Deserialize;
 use std::{
+    convert::Infallible,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::{broadcast, Mutex};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_stream::wrappers::BroadcastStream;
 
 #[derive(Clone)]
@@ -42,6 +49,17 @@ struct AppState {
     safe_mode: bool,
 }
 
+#[derive(Clone, Debug)]
+pub enum StdioAuth {
+    None,
+    Token(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct StdioConfig {
+    pub auth: StdioAuth,
+}
+
 #[derive(Debug, Deserialize)]
 struct EventsQuery {
     workspace_id: String,
@@ -53,6 +71,10 @@ struct EventsQuery {
 struct ProjectsQuery {
     workspace_id: String,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EmptyPayload {}
 
 pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let _ = tracing_subscriber::fmt()
@@ -86,7 +108,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         .route("/v1/workspaces", axum::routing::get(handle_list_workspaces))
         .route("/v1/projects", axum::routing::get(handle_list_projects))
         .route("/v1/events", axum::routing::get(handle_events_read))
-        .route("/v1/events/stream", axum::routing::get(handle_events_stream))
+        .route(
+            "/v1/events/stream",
+            axum::routing::get(handle_events_stream),
+        )
+        .route(
+            "/v1/events/stream-ndjson",
+            axum::routing::get(handle_events_stream_ndjson),
+        )
         .with_state(state);
 
     tracing::info!("mpd listening on {}", local_addr);
@@ -106,6 +135,16 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     cleanup_runtime_file(&config.runtime_dir);
     Ok(())
+}
+
+pub async fn run_stdio(config: DaemonConfig, stdio: StdioConfig) -> anyhow::Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    run_stdio_with_io(config, stdio, stdin, stdout).await
 }
 
 async fn handle_ping(
@@ -159,16 +198,11 @@ async fn handle_events_read(
     Ok(Json(events))
 }
 
-async fn handle_events_stream(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Query(query): Query<EventsQuery>,
-) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>, StatusCode>
-{
-    authorize(&state, &headers)?;
-    let from = query.from.unwrap_or(0);
-    let workspace_id = query.workspace_id.clone();
-
+async fn build_event_stream(
+    state: &AppState,
+    workspace_id: String,
+    from: i64,
+) -> Result<impl Stream<Item = mp_protocol::EventEnvelope>, StatusCode> {
     let initial_events = {
         let store = state.store.lock().await;
         store
@@ -178,26 +212,63 @@ async fn handle_events_stream(
 
     let mut last_seq = initial_events.last().map(|e| e.seq_global).unwrap_or(from);
     let rx = state.broadcaster.subscribe();
-    let stream = async_stream::stream! {
+
+    Ok(async_stream::stream! {
         for event in initial_events {
-            let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
             last_seq = event.seq_global;
-            yield Ok(Event::default().data(data));
+            yield event;
         }
 
         let mut broadcast_stream = BroadcastStream::new(rx);
         while let Some(item) = broadcast_stream.next().await {
             if let Ok(event) = item {
                 if event.workspace_id == workspace_id && event.seq_global > last_seq {
-                    let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
                     last_seq = event.seq_global;
-                    yield Ok(Event::default().data(data));
+                    yield event;
                 }
             }
         }
-    };
+    })
+}
+
+async fn handle_events_stream(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<EventsQuery>,
+) -> Result<
+    Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>,
+    StatusCode,
+> {
+    authorize(&state, &headers)?;
+    let from = query.from.unwrap_or(0);
+    let workspace_id = query.workspace_id.clone();
+    let stream = build_event_stream(&state, workspace_id, from).await?;
+    let stream = stream.map(|event| {
+        let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
+        Ok(Event::default().data(data))
+    });
 
     Ok(Sse::new(stream))
+}
+
+async fn handle_events_stream_ndjson(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<EventsQuery>,
+) -> Result<Response<Body>, StatusCode> {
+    authorize(&state, &headers)?;
+    let from = query.from.unwrap_or(0);
+    let workspace_id = query.workspace_id.clone();
+    let stream = build_event_stream(&state, workspace_id, from).await?;
+    let body_stream = stream.map(|event| {
+        let line = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
+        Ok::<Bytes, Infallible>(Bytes::from(format!("{line}\n")))
+    });
+    let mut response = Response::new(Body::from_stream(body_stream));
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, "application/x-ndjson".parse().unwrap());
+    Ok(response)
 }
 
 async fn handle_submit(
@@ -206,62 +277,67 @@ async fn handle_submit(
     Json(command): Json<CommandEnvelope>,
 ) -> Result<Json<SubmitCommandResponse>, StatusCode> {
     authorize(&state, &headers)?;
+    let response = submit_command_inner(&state, command).await?;
+    Ok(Json(response))
+}
 
+async fn submit_command_inner(
+    state: &AppState,
+    command: CommandEnvelope,
+) -> Result<SubmitCommandResponse, StatusCode> {
     if state.safe_mode {
         let rejection = CommandRejection {
             code: "safe_mode".to_string(),
             message: "daemon running in safe mode".to_string(),
         };
-        return Ok(Json(SubmitCommandResponse {
+        return Ok(SubmitCommandResponse {
             accepted: false,
             events: Vec::new(),
             rejection: Some(rejection),
             trace_id: command.trace_id,
-        }));
+        });
     }
 
     let command_type = command.command_type.clone();
     let command_kind = match command_kind(&command_type) {
         Some(kind) => kind,
         None => {
-            return Ok(Json(
-                reject_command(&state, &command, ErrorCode::UnknownCommand, "unknown command type")
-                    .await?,
-            ));
+            return Ok(reject_command(
+                state,
+                &command,
+                ErrorCode::UnknownCommand,
+                "unknown command type",
+            )
+            .await?);
         }
     };
 
     if command_kind == CommandKind::ReadOnly {
-        return Ok(Json(
-            reject_command(
-                &state,
-                &command,
-                ErrorCode::ValidationFailed,
-                "read-only commands must use query endpoints",
-            )
-            .await?,
-        ));
+        return Ok(reject_command(
+            state,
+            &command,
+            ErrorCode::ValidationFailed,
+            "read-only commands must use query endpoints",
+        )
+        .await?);
     }
 
     if command.idempotency_key.is_none() {
-        return Ok(Json(
-            reject_command(
-                &state,
-                &command,
-                ErrorCode::IdempotencyKeyRequired,
-                "idempotency_key required",
-            )
-            .await?,
-        ));
+        return Ok(reject_command(
+            state,
+            &command,
+            ErrorCode::IdempotencyKeyRequired,
+            "idempotency_key required",
+        )
+        .await?);
     }
 
-    if let Err(err) = state
-        .schema_registry
-        .validate_command_payload(&command_type, command.schema_version, &command.payload)
-    {
-        return Ok(Json(
-            reject_command(&state, &command, ErrorCode::InvalidSchema, &err.message).await?,
-        ));
+    if let Err(err) = state.schema_registry.validate_command_payload(
+        &command_type,
+        command.schema_version,
+        &command.payload,
+    ) {
+        return Ok(reject_command(state, &command, ErrorCode::InvalidSchema, &err.message).await?);
     }
 
     let actor = Actor::system();
@@ -271,9 +347,9 @@ async fn handle_submit(
                 .map_err(|_| StatusCode::BAD_REQUEST)?;
             if let Some(expected_version) = command.expected_version {
                 if expected_version != 0 {
-                    return Ok(Json(
+                    return Ok(
                         reject_command(
-                            &state,
+                            state,
                             &command,
                             ErrorCode::ExpectedVersionMismatch,
                             &format!(
@@ -281,14 +357,11 @@ async fn handle_submit(
                             ),
                         )
                         .await?,
-                    ));
+                    );
                 }
             }
             let workspace_id = mp_kernel::new_uuid();
-            let root_path = payload
-                .path
-                .clone()
-                .unwrap_or_else(|| payload.name.clone());
+            let root_path = payload.path.clone().unwrap_or_else(|| payload.name.clone());
             let payload_json = serde_json::to_value(mp_kernel::WorkspaceCreatedPayload {
                 name: payload.name,
                 root_path,
@@ -321,17 +394,13 @@ async fn handle_submit(
                         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
                 };
                 if current != expected_version {
-                    return Ok(Json(
-                        reject_command(
-                            &state,
-                            &command,
-                            ErrorCode::ExpectedVersionMismatch,
-                            &format!(
-                                "expected version {expected_version} does not match {current}"
-                            ),
-                        )
-                        .await?,
-                    ));
+                    return Ok(reject_command(
+                        state,
+                        &command,
+                        ErrorCode::ExpectedVersionMismatch,
+                        &format!("expected version {expected_version} does not match {current}"),
+                    )
+                    .await?);
                 }
             }
 
@@ -357,10 +426,13 @@ async fn handle_submit(
             }]
         }
         _ => {
-            return Ok(Json(
-                reject_command(&state, &command, ErrorCode::UnknownCommand, "unsupported command")
-                    .await?,
-            ));
+            return Ok(reject_command(
+                state,
+                &command,
+                ErrorCode::UnknownCommand,
+                "unsupported command",
+            )
+            .await?);
         }
     };
 
@@ -372,13 +444,14 @@ async fn handle_submit(
     };
 
     for event in &events {
-        if let Err(err) = state
-            .schema_registry
-            .validate_event_payload(&event.event_type, event.schema_version, &event.payload)
-        {
-            return Ok(Json(
-                reject_command(&state, &command, ErrorCode::InvalidSchema, &err.message).await?,
-            ));
+        if let Err(err) = state.schema_registry.validate_event_payload(
+            &event.event_type,
+            event.schema_version,
+            &event.payload,
+        ) {
+            return Ok(
+                reject_command(state, &command, ErrorCode::InvalidSchema, &err.message).await?,
+            );
         }
     }
 
@@ -395,12 +468,306 @@ async fn handle_submit(
     }
 
     let rejection = extract_rejection(&append_result.events);
-    Ok(Json(SubmitCommandResponse {
+    Ok(SubmitCommandResponse {
         accepted: rejection.is_none(),
         events: append_result.events,
         rejection,
         trace_id: command.trace_id,
-    }))
+    })
+}
+
+pub async fn run_stdio_with_io<R, W>(
+    config: DaemonConfig,
+    stdio: StdioConfig,
+    input: R,
+    output: W,
+) -> anyhow::Result<()>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    let store = SqliteStore::open(&config.db_path)?;
+    if !config.safe_mode {
+        store.rebuild_projections()?;
+    }
+
+    let registry = SchemaRegistry::new()?;
+    let (tx, _) = broadcast::channel(1024);
+
+    let token = match &stdio.auth {
+        StdioAuth::Token(token) => token.clone(),
+        StdioAuth::None => generate_token()?,
+    };
+
+    let state = AppState {
+        store: Arc::new(Mutex::new(store)),
+        schema_registry: Arc::new(registry),
+        broadcaster: tx,
+        token,
+        safe_mode: config.safe_mode,
+    };
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
+    let mut stdout = BufWriter::new(output);
+    let writer_task = tokio::spawn(async move {
+        while let Some(line) = out_rx.recv().await {
+            if stdout.write_all(line.as_bytes()).await.is_err() {
+                break;
+            }
+            if stdout.flush().await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut authenticated = matches!(stdio.auth, StdioAuth::None);
+    let auth_token = match &stdio.auth {
+        StdioAuth::Token(token) => Some(token.clone()),
+        StdioAuth::None => None,
+    };
+    let mut subscription_task = None;
+    let mut reader = BufReader::new(input).lines();
+
+    while let Some(line) = reader.next_line().await? {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let frame: StdioFrame = match serde_json::from_str(trimmed) {
+            Ok(frame) => frame,
+            Err(err) => {
+                send_stdio_error(&out_tx, None, "invalid_schema", err.to_string());
+                continue;
+            }
+        };
+
+        if frame.schema_version != 1 {
+            send_stdio_error(
+                &out_tx,
+                frame.request_id.clone(),
+                "invalid_schema",
+                "unsupported schema_version".to_string(),
+            );
+            continue;
+        }
+
+        if !authenticated {
+            if frame.frame_type != "auth" {
+                send_stdio_error(
+                    &out_tx,
+                    frame.request_id.clone(),
+                    "unauthorized",
+                    "auth required".to_string(),
+                );
+                continue;
+            }
+            match serde_json::from_value::<StdioAuthPayload>(frame.payload.clone()) {
+                Ok(payload) => {
+                    if auth_token.as_deref() != Some(payload.token.as_str()) {
+                        send_stdio_error(
+                            &out_tx,
+                            frame.request_id.clone(),
+                            "unauthorized",
+                            "invalid token".to_string(),
+                        );
+                        continue;
+                    }
+                    authenticated = true;
+                    send_stdio_response(
+                        &out_tx,
+                        frame.request_id,
+                        "auth.response",
+                        serde_json::json!({"status": "ok"}),
+                    );
+                }
+                Err(err) => {
+                    send_stdio_error(
+                        &out_tx,
+                        frame.request_id.clone(),
+                        "invalid_schema",
+                        err.to_string(),
+                    );
+                }
+            }
+            continue;
+        }
+
+        match frame.frame_type.as_str() {
+            "auth" => {
+                send_stdio_response(
+                    &out_tx,
+                    frame.request_id,
+                    "auth.response",
+                    serde_json::json!({"status": "ok"}),
+                );
+            }
+            "command.submit" => {
+                let command: CommandEnvelope = match serde_json::from_value(frame.payload.clone())
+                    .map_err(|err| err.to_string())
+                {
+                    Ok(command) => command,
+                    Err(err) => {
+                        send_stdio_error(&out_tx, frame.request_id.clone(), "invalid_schema", err);
+                        continue;
+                    }
+                };
+
+                match submit_command_inner(&state, command).await {
+                    Ok(response) => {
+                        let payload = serde_json::to_value(response)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        send_stdio_response(&out_tx, frame.request_id, "command.response", payload);
+                    }
+                    Err(status) => {
+                        send_stdio_error(
+                            &out_tx,
+                            frame.request_id.clone(),
+                            error_code_from_status(status),
+                            "command failed".to_string(),
+                        );
+                    }
+                }
+            }
+            "query.workspaces" => {
+                if let Err(err) = serde_json::from_value::<EmptyPayload>(frame.payload.clone()) {
+                    send_stdio_error(
+                        &out_tx,
+                        frame.request_id.clone(),
+                        "invalid_schema",
+                        err.to_string(),
+                    );
+                    continue;
+                }
+                let store = state.store.lock().await;
+                match store.list_workspaces() {
+                    Ok(workspaces) => {
+                        let payload = serde_json::to_value(workspaces)
+                            .unwrap_or_else(|_| serde_json::json!([]));
+                        send_stdio_response(
+                            &out_tx,
+                            frame.request_id,
+                            "query.workspaces.response",
+                            payload,
+                        );
+                    }
+                    Err(err) => {
+                        tracing::error!("stdio query workspaces failed: {err}");
+                        send_stdio_error(
+                            &out_tx,
+                            frame.request_id.clone(),
+                            "internal",
+                            "query failed".to_string(),
+                        );
+                    }
+                }
+            }
+            "query.projects" => {
+                let query: StdioProjectsQuery = match serde_json::from_value(frame.payload.clone())
+                    .map_err(|err| err.to_string())
+                {
+                    Ok(query) => query,
+                    Err(err) => {
+                        send_stdio_error(&out_tx, frame.request_id.clone(), "invalid_schema", err);
+                        continue;
+                    }
+                };
+                let store = state.store.lock().await;
+                match store.list_projects(&query.workspace_id) {
+                    Ok(projects) => {
+                        let payload = serde_json::to_value(projects)
+                            .unwrap_or_else(|_| serde_json::json!([]));
+                        send_stdio_response(
+                            &out_tx,
+                            frame.request_id,
+                            "query.projects.response",
+                            payload,
+                        );
+                    }
+                    Err(err) => {
+                        tracing::error!("stdio query projects failed: {err}");
+                        send_stdio_error(
+                            &out_tx,
+                            frame.request_id.clone(),
+                            "internal",
+                            "query failed".to_string(),
+                        );
+                    }
+                }
+            }
+            "events.subscribe" => {
+                if subscription_task.is_some() {
+                    send_stdio_error(
+                        &out_tx,
+                        frame.request_id.clone(),
+                        "conflict",
+                        "subscription already active".to_string(),
+                    );
+                    continue;
+                }
+                let sub: StdioEventsSubscribe = match serde_json::from_value(frame.payload.clone())
+                    .map_err(|err| err.to_string())
+                {
+                    Ok(sub) => sub,
+                    Err(err) => {
+                        send_stdio_error(&out_tx, frame.request_id.clone(), "invalid_schema", err);
+                        continue;
+                    }
+                };
+                let from = sub.from.unwrap_or(0);
+                let workspace_id = sub.workspace_id.clone();
+                let stream = match build_event_stream(&state, workspace_id, from).await {
+                    Ok(stream) => stream,
+                    Err(status) => {
+                        send_stdio_error(
+                            &out_tx,
+                            frame.request_id.clone(),
+                            error_code_from_status(status),
+                            "subscribe failed".to_string(),
+                        );
+                        continue;
+                    }
+                };
+                send_stdio_response(
+                    &out_tx,
+                    frame.request_id,
+                    "events.subscribe.response",
+                    serde_json::json!({"status": "ok"}),
+                );
+                let out_tx_clone = out_tx.clone();
+                subscription_task = Some(tokio::spawn(async move {
+                    let mut stream = Box::pin(stream);
+                    while let Some(event) = stream.as_mut().next().await {
+                        let payload =
+                            serde_json::to_value(event).unwrap_or_else(|_| serde_json::json!({}));
+                        send_stdio_frame(
+                            &out_tx_clone,
+                            StdioFrame {
+                                request_id: None,
+                                frame_type: "events.event".to_string(),
+                                schema_version: 1,
+                                payload,
+                            },
+                        );
+                    }
+                }));
+            }
+            _ => {
+                send_stdio_error(
+                    &out_tx,
+                    frame.request_id.clone(),
+                    "unknown_command",
+                    "unknown stdio frame type".to_string(),
+                );
+            }
+        }
+    }
+
+    if let Some(task) = subscription_task {
+        task.abort();
+    }
+    drop(out_tx);
+    let _ = writer_task.await;
+    Ok(())
 }
 
 fn extract_rejection(events: &[mp_protocol::EventEnvelope]) -> Option<CommandRejection> {
@@ -437,7 +804,8 @@ async fn reject_command(
         message: message.to_string(),
         details: None,
     };
-    let payload_json = serde_json::to_value(payload).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let payload_json =
+        serde_json::to_value(payload).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let event = NewEvent {
         event_type: EVENT_COMMAND_REJECTED.to_string(),
@@ -482,6 +850,56 @@ async fn reject_command(
         }),
         trace_id: command.trace_id.clone(),
     })
+}
+
+fn send_stdio_frame(out_tx: &mpsc::UnboundedSender<String>, frame: StdioFrame) {
+    if let Ok(mut line) = serde_json::to_string(&frame) {
+        line.push('\n');
+        let _ = out_tx.send(line);
+    }
+}
+
+fn send_stdio_response(
+    out_tx: &mpsc::UnboundedSender<String>,
+    request_id: Option<String>,
+    frame_type: &str,
+    payload: serde_json::Value,
+) {
+    send_stdio_frame(
+        out_tx,
+        StdioFrame {
+            request_id,
+            frame_type: frame_type.to_string(),
+            schema_version: 1,
+            payload,
+        },
+    );
+}
+
+fn send_stdio_error(
+    out_tx: &mpsc::UnboundedSender<String>,
+    request_id: Option<String>,
+    code: &str,
+    message: String,
+) {
+    let payload = serde_json::to_value(StdioErrorPayload {
+        code: code.to_string(),
+        message,
+    })
+    .unwrap_or_else(
+        |_| serde_json::json!({ "code": "internal", "message": "serialization error" }),
+    );
+    send_stdio_response(out_tx, request_id, "error", payload);
+}
+
+fn error_code_from_status(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::BAD_REQUEST => "bad_request",
+        StatusCode::UNAUTHORIZED => "unauthorized",
+        StatusCode::FORBIDDEN => "forbidden",
+        StatusCode::NOT_FOUND => "not_found",
+        _ => "internal",
+    }
 }
 
 fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), StatusCode> {

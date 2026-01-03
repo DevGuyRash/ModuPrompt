@@ -1,14 +1,20 @@
 use anyhow::Context;
+use mp_dirs::runtime_dir as default_runtime_dir_impl;
 use mp_kernel::{
     DaemonPingResponse, ProjectCreatePayload, ProjectListEntry, RuntimeInfo,
     WorkspaceCreatePayload, WorkspaceListEntry,
 };
-use mp_dirs::runtime_dir as default_runtime_dir_impl;
-use mp_protocol::{CommandEnvelope, SubmitCommandResponse};
+use mp_protocol::{
+    CommandEnvelope, StdioAuthPayload, StdioErrorPayload, StdioEventsSubscribe, StdioFrame,
+    StdioProjectsQuery, SubmitCommandResponse,
+};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::{Client as HttpClient, Response};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::process::{Child, Command as TokioCommand};
 use url::Url;
 use uuid::Uuid;
 
@@ -21,9 +27,8 @@ pub struct Client {
 impl Client {
     pub fn from_runtime_dir(runtime_dir: &Path) -> anyhow::Result<Self> {
         let path = runtime_dir.join("daemon.json");
-        let data = std::fs::read(&path).with_context(|| {
-            format!("failed to read runtime file at {}", path.display())
-        })?;
+        let data = std::fs::read(&path)
+            .with_context(|| format!("failed to read runtime file at {}", path.display()))?;
         let info: RuntimeInfo = serde_json::from_slice(&data)?;
         let base_url = Url::parse(&info.addr)?;
         Ok(Self {
@@ -129,13 +134,27 @@ impl Client {
         Ok(resp.json().await?)
     }
 
-    pub async fn events_stream(
+    pub async fn events_stream(&self, workspace_id: &str, from: i64) -> anyhow::Result<Response> {
+        let url = self.base_url.join(&format!(
+            "/v1/events/stream?workspace_id={workspace_id}&from={from}"
+        ))?;
+        let resp = self
+            .http
+            .get(url)
+            .headers(self.auth_headers())
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp)
+    }
+
+    pub async fn events_stream_ndjson(
         &self,
         workspace_id: &str,
         from: i64,
     ) -> anyhow::Result<Response> {
         let url = self.base_url.join(&format!(
-            "/v1/events/stream?workspace_id={workspace_id}&from={from}"
+            "/v1/events/stream-ndjson?workspace_id={workspace_id}&from={from}"
         ))?;
         let resp = self
             .http
@@ -189,4 +208,164 @@ fn new_idempotency_key() -> String {
 
 fn new_trace_id() -> String {
     format!("tr_{}", Uuid::now_v7())
+}
+
+#[derive(Debug, Clone)]
+pub enum StdioAuthMode {
+    None,
+    Token(String),
+}
+
+pub struct StdioClient {
+    child: Child,
+    reader: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    writer: BufWriter<tokio::process::ChildStdin>,
+}
+
+impl StdioClient {
+    pub async fn spawn(
+        mpd_path: &Path,
+        db: Option<PathBuf>,
+        auth: StdioAuthMode,
+    ) -> anyhow::Result<Self> {
+        let mut cmd = TokioCommand::new(mpd_path);
+        cmd.arg("serve-stdio");
+        match &auth {
+            StdioAuthMode::None => {
+                cmd.arg("--auth").arg("none");
+            }
+            StdioAuthMode::Token(token) => {
+                cmd.arg("--auth").arg("token");
+                cmd.arg("--token").arg(token);
+            }
+        }
+        if let Some(db_path) = db {
+            cmd.arg("--db").arg(db_path);
+        }
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+
+        let mut child = cmd.spawn().context("failed to spawn mpd serve-stdio")?;
+        let stdin = child.stdin.take().context("stdio stdin missing")?;
+        let stdout = child.stdout.take().context("stdio stdout missing")?;
+
+        let mut client = Self {
+            child,
+            reader: BufReader::new(stdout).lines(),
+            writer: BufWriter::new(stdin),
+        };
+
+        if let StdioAuthMode::Token(token) = auth {
+            client.auth(token).await?;
+        }
+
+        Ok(client)
+    }
+
+    pub async fn submit_command(
+        &mut self,
+        command: CommandEnvelope,
+    ) -> anyhow::Result<SubmitCommandResponse> {
+        let payload = serde_json::to_value(command)?;
+        let response = self
+            .request("command.submit", payload)
+            .await?
+            .payload;
+        Ok(serde_json::from_value(response)?)
+    }
+
+    pub async fn list_workspaces(&mut self) -> anyhow::Result<Vec<WorkspaceListEntry>> {
+        let response = self
+            .request("query.workspaces", serde_json::json!({}))
+            .await?
+            .payload;
+        Ok(serde_json::from_value(response)?)
+    }
+
+    pub async fn list_projects(
+        &mut self,
+        workspace_id: &str,
+    ) -> anyhow::Result<Vec<ProjectListEntry>> {
+        let payload = serde_json::to_value(StdioProjectsQuery {
+            workspace_id: workspace_id.to_string(),
+        })?;
+        let response = self.request("query.projects", payload).await?.payload;
+        Ok(serde_json::from_value(response)?)
+    }
+
+    pub async fn subscribe_events(&mut self, workspace_id: &str, from: i64) -> anyhow::Result<()> {
+        let payload = serde_json::to_value(StdioEventsSubscribe {
+            workspace_id: workspace_id.to_string(),
+            from: Some(from),
+        })?;
+        let _ = self.request("events.subscribe", payload).await?;
+        Ok(())
+    }
+
+    pub async fn next_event(&mut self) -> anyhow::Result<mp_protocol::EventEnvelope> {
+        loop {
+            let frame = self.read_frame().await?;
+            if frame.frame_type == "events.event" {
+                return Ok(serde_json::from_value(frame.payload)?);
+            }
+        }
+    }
+
+    pub async fn shutdown(mut self) -> anyhow::Result<()> {
+        let _ = self.child.kill().await;
+        Ok(())
+    }
+
+    async fn auth(&mut self, token: String) -> anyhow::Result<()> {
+        let payload = serde_json::to_value(StdioAuthPayload { token })?;
+        let _ = self.request("auth", payload).await?;
+        Ok(())
+    }
+
+    async fn request(&mut self, frame_type: &str, payload: Value) -> anyhow::Result<StdioFrame> {
+        let request_id = new_request_id();
+        let frame = StdioFrame {
+            request_id: Some(request_id.clone()),
+            frame_type: frame_type.to_string(),
+            schema_version: 1,
+            payload,
+        };
+        self.send_frame(frame).await?;
+
+        loop {
+            let frame = self.read_frame().await?;
+            if frame.request_id.as_deref() == Some(request_id.as_str()) {
+                return Ok(frame);
+            }
+        }
+    }
+
+    async fn send_frame(&mut self, frame: StdioFrame) -> anyhow::Result<()> {
+        let mut line = serde_json::to_string(&frame)?;
+        line.push('\n');
+        self.writer.write_all(line.as_bytes()).await?;
+        self.writer.flush().await?;
+        Ok(())
+    }
+
+    async fn read_frame(&mut self) -> anyhow::Result<StdioFrame> {
+        while let Some(line) = self.reader.next_line().await? {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let frame: StdioFrame = serde_json::from_str(trimmed)?;
+            if frame.frame_type == "error" {
+                let payload: StdioErrorPayload = serde_json::from_value(frame.payload.clone())?;
+                return Err(anyhow::anyhow!(payload.message));
+            }
+            return Ok(frame);
+        }
+        Err(anyhow::anyhow!("stdio connection closed"))
+    }
+}
+
+fn new_request_id() -> String {
+    format!("rq_{}", Uuid::now_v7())
 }
