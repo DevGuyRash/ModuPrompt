@@ -302,34 +302,34 @@ async fn submit_command_inner(
     let command_kind = match command_kind(&command_type) {
         Some(kind) => kind,
         None => {
-            return Ok(reject_command(
+            return reject_command(
                 state,
                 &command,
                 ErrorCode::UnknownCommand,
                 "unknown command type",
             )
-            .await?);
+            .await;
         }
     };
 
     if command_kind == CommandKind::ReadOnly {
-        return Ok(reject_command(
+        return reject_command(
             state,
             &command,
             ErrorCode::ValidationFailed,
             "read-only commands must use query endpoints",
         )
-        .await?);
+        .await;
     }
 
     if command.idempotency_key.is_none() {
-        return Ok(reject_command(
+        return reject_command(
             state,
             &command,
             ErrorCode::IdempotencyKeyRequired,
             "idempotency_key required",
         )
-        .await?);
+        .await;
     }
 
     if let Err(err) = state.schema_registry.validate_command_payload(
@@ -337,7 +337,7 @@ async fn submit_command_inner(
         command.schema_version,
         &command.payload,
     ) {
-        return Ok(reject_command(state, &command, ErrorCode::InvalidSchema, &err.message).await?);
+        return reject_command(state, &command, ErrorCode::InvalidSchema, &err.message).await;
     }
 
     let actor = Actor::system();
@@ -347,17 +347,15 @@ async fn submit_command_inner(
                 .map_err(|_| StatusCode::BAD_REQUEST)?;
             if let Some(expected_version) = command.expected_version {
                 if expected_version != 0 {
-                    return Ok(
-                        reject_command(
-                            state,
-                            &command,
-                            ErrorCode::ExpectedVersionMismatch,
-                            &format!(
-                                "expected version {expected_version} does not match 0 for new workspace"
-                            ),
-                        )
-                        .await?,
-                    );
+                    return reject_command(
+                        state,
+                        &command,
+                        ErrorCode::ExpectedVersionMismatch,
+                        &format!(
+                            "expected version {expected_version} does not match 0 for new workspace"
+                        ),
+                    )
+                    .await;
                 }
             }
             let workspace_id = mp_kernel::new_uuid();
@@ -394,13 +392,13 @@ async fn submit_command_inner(
                         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
                 };
                 if current != expected_version {
-                    return Ok(reject_command(
+                    return reject_command(
                         state,
                         &command,
                         ErrorCode::ExpectedVersionMismatch,
                         &format!("expected version {expected_version} does not match {current}"),
                     )
-                    .await?);
+                    .await;
                 }
             }
 
@@ -426,13 +424,13 @@ async fn submit_command_inner(
             }]
         }
         _ => {
-            return Ok(reject_command(
+            return reject_command(
                 state,
                 &command,
                 ErrorCode::UnknownCommand,
                 "unsupported command",
             )
-            .await?);
+            .await;
         }
     };
 
@@ -449,9 +447,7 @@ async fn submit_command_inner(
             event.schema_version,
             &event.payload,
         ) {
-            return Ok(
-                reject_command(state, &command, ErrorCode::InvalidSchema, &err.message).await?,
-            );
+            return reject_command(state, &command, ErrorCode::InvalidSchema, &err.message).await;
         }
     }
 

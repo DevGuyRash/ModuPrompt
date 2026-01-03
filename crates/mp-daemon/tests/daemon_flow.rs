@@ -379,7 +379,7 @@ async fn stdio_transport_submit_and_subscribe() -> anyhow::Result<()> {
 
     assert!(saw_event);
     drop(client_write);
-    let _ = server_task.abort();
+    server_task.abort();
     Ok(())
 }
 
