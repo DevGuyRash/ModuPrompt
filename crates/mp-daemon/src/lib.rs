@@ -112,6 +112,16 @@ impl IntoResponse for ApiError {
     }
 }
 
+fn internal_error(trace_id: Option<String>) -> ApiError {
+    ApiError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        ErrorCode::Internal,
+        "internal error",
+        None,
+        trace_id,
+    )
+}
+
 pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -203,13 +213,8 @@ async fn handle_list_workspaces(
     authorize(&state, &headers)?;
     let store = state.store.lock().await;
     let workspaces = store.list_workspaces().map_err(|err| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorCode::Unknown,
-            err.to_string(),
-            None,
-            None,
-        )
+        tracing::error!("list_workspaces failed: {err}");
+        internal_error(None)
     })?;
     Ok(Json(workspaces))
 }
@@ -231,13 +236,8 @@ async fn handle_list_projects(
     })?;
     let store = state.store.lock().await;
     let projects = store.list_projects(&query.workspace_id).map_err(|err| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorCode::Unknown,
-            err.to_string(),
-            None,
-            None,
-        )
+        tracing::error!("list_projects failed: {err}");
+        internal_error(None)
     })?;
     Ok(Json(projects))
 }
@@ -262,13 +262,8 @@ async fn handle_events_read(
     let events = store
         .read_from(&query.workspace_id, from, None)
         .map_err(|err| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ErrorCode::Unknown,
-                err.to_string(),
-                None,
-                None,
-            )
+            tracing::error!("read_from failed: {err}");
+            internal_error(None)
         })?;
     Ok(Json(events))
 }
@@ -281,13 +276,8 @@ async fn build_event_stream(
     let initial_events = {
         let store = state.store.lock().await;
         store.read_from(&workspace_id, from, None).map_err(|err| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ErrorCode::Unknown,
-                err.to_string(),
-                None,
-                None,
-            )
+            tracing::error!("read_from stream failed: {err}");
+            internal_error(None)
         })?
     };
 
@@ -489,13 +479,8 @@ async fn submit_command_inner(
                 root_path,
             })
             .map_err(|err| {
-                ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    ErrorCode::Unknown,
-                    err.to_string(),
-                    None,
-                    Some(command.trace_id.clone()),
-                )
+                tracing::error!("serialize workspace.created payload failed: {err}");
+                internal_error(Some(command.trace_id.clone()))
             })?;
             vec![NewEvent {
                 event_type: EVENT_WORKSPACE_CREATED.to_string(),
@@ -528,13 +513,8 @@ async fn submit_command_inner(
                 let current = {
                     let store = state.store.lock().await;
                     store.head_seq(&payload.workspace_id).map_err(|err| {
-                        ApiError::new(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            ErrorCode::Unknown,
-                            err.to_string(),
-                            None,
-                            Some(command.trace_id.clone()),
-                        )
+                        tracing::error!("head_seq failed: {err}");
+                        internal_error(Some(command.trace_id.clone()))
                     })?
                 };
                 if current != expected_version {
@@ -554,13 +534,8 @@ async fn submit_command_inner(
                 name: payload.name,
             })
             .map_err(|err| {
-                ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    ErrorCode::Unknown,
-                    err.to_string(),
-                    None,
-                    Some(command.trace_id.clone()),
-                )
+                tracing::error!("serialize project.created payload failed: {err}");
+                internal_error(Some(command.trace_id.clone()))
             })?;
             vec![NewEvent {
                 event_type: EVENT_PROJECT_CREATED.to_string(),
@@ -610,13 +585,7 @@ async fn submit_command_inner(
         Ok(result) => result,
         Err(err) => {
             tracing::error!("append failed: {err}");
-            return Err(ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ErrorCode::Unknown,
-                "append failed",
-                None,
-                Some(command.trace_id.clone()),
-            ));
+            return Err(internal_error(Some(command.trace_id.clone())));
         }
     };
     for event in &append_result.events {
@@ -811,7 +780,7 @@ where
                         send_stdio_error(
                             &out_tx,
                             frame.request_id.clone(),
-                            ErrorCode::Unknown,
+                            ErrorCode::Internal,
                             "query failed".to_string(),
                         );
                     }
@@ -849,7 +818,7 @@ where
                         send_stdio_error(
                             &out_tx,
                             frame.request_id.clone(),
-                            ErrorCode::Unknown,
+                            ErrorCode::Internal,
                             "query failed".to_string(),
                         );
                     }
@@ -966,13 +935,8 @@ async fn reject_command(
         details: None,
     };
     let payload_json = serde_json::to_value(payload).map_err(|err| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorCode::Unknown,
-            err.to_string(),
-            None,
-            Some(command.trace_id.clone()),
-        )
+        tracing::error!("serialize command.rejected payload failed: {err}");
+        internal_error(Some(command.trace_id.clone()))
     })?;
 
     let event = NewEvent {
@@ -1002,13 +966,7 @@ async fn reject_command(
         Ok(result) => result,
         Err(err) => {
             tracing::error!("append failed: {err}");
-            return Err(ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ErrorCode::Unknown,
-                "append failed",
-                None,
-                Some(command.trace_id.clone()),
-            ));
+            return Err(internal_error(Some(command.trace_id.clone())));
         }
     };
     for event in &append_result.events {
@@ -1109,6 +1067,21 @@ fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_error_produces_redacted_response() {
+        let trace_id = Some("trace_123".to_string());
+        let err = internal_error(trace_id.clone());
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.error.code, ErrorCode::Internal);
+        assert_eq!(err.error.message, "internal error");
+        assert_eq!(err.error.trace_id, trace_id);
+    }
 }
 
 fn generate_token() -> anyhow::Result<String> {
