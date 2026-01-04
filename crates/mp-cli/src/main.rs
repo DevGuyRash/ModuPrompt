@@ -181,10 +181,20 @@ fn render_error(err: &CliError, json: bool) {
     if json {
         match serde_json::to_string_pretty(&err.error) {
             Ok(payload) => println!("{payload}"),
-            Err(_) => println!(
-                "{{\"code\":\"{}\",\"message\":\"{}\"}}",
-                err.error.code, err.error.message
-            ),
+            Err(_) => {
+                let fallback = serde_json::json!({
+                    "code": err.error.code,
+                    "message": err.error.message,
+                    "details": err.error.details,
+                    "trace_id": err.error.trace_id,
+                });
+                match serde_json::to_string(&fallback) {
+                    Ok(payload) => println!("{payload}"),
+                    Err(_) => {
+                        println!("{{\"code\":\"internal\",\"message\":\"serialization error\"}}")
+                    }
+                }
+            }
         }
         return;
     }
