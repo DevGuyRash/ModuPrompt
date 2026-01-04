@@ -121,5 +121,6 @@ sqlx-data.json
 .sqlx/
 
 # Local outputs
+.local/
 *repomix*
 gh_issues.md

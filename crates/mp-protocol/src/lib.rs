@@ -1,5 +1,5 @@
 use anyhow::Context;
-use mp_kernel::{Actor, Subject};
+use mp_kernel::{Actor, ErrorCode, Subject};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -63,8 +63,20 @@ pub struct SubmitCommandResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommandRejection {
-    pub code: String,
+    pub code: ErrorCode,
     pub message: String,
+}
+
+/// Canonical daemon error response payload used across transports.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ErrorResponse {
+    pub code: ErrorCode,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,12 +90,7 @@ pub struct StdioFrame {
     pub payload: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StdioErrorPayload {
-    pub code: String,
-    pub message: String,
-}
+pub type StdioErrorPayload = ErrorResponse;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -229,7 +236,8 @@ impl SchemaRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::SchemaRegistry;
+    use super::{ErrorResponse, SchemaRegistry};
+    use mp_kernel::ErrorCode;
     use serde_json::json;
 
     #[test]
@@ -268,5 +276,22 @@ mod tests {
         let payload = json!({});
         let result = registry.validate_command_payload("workspace.create", 1, &payload);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn error_response_serializes_stably() {
+        let error = ErrorResponse {
+            code: ErrorCode::Unauthorized,
+            message: "missing token".to_string(),
+            details: None,
+            trace_id: Some("tr_123".to_string()),
+        };
+        let value = serde_json::to_value(error).expect("serialize");
+        let expected = json!({
+            "code": "unauthorized",
+            "message": "missing token",
+            "trace_id": "tr_123"
+        });
+        assert_eq!(value, expected);
     }
 }

@@ -1,8 +1,9 @@
 use axum::{
     body::Body,
+    extract::rejection::{JsonRejection, QueryRejection},
     extract::{Query, State},
     http::{header::CONTENT_TYPE, HeaderMap, StatusCode},
-    response::{sse::Event, sse::Sse, Response},
+    response::{sse::Event, sse::Sse, IntoResponse, Response},
     Json,
 };
 use base64::Engine;
@@ -15,13 +16,14 @@ use mp_kernel::{
     EVENT_PROJECT_CREATED, EVENT_WORKSPACE_CREATED,
 };
 use mp_protocol::{
-    CommandEnvelope, CommandRejection, SchemaRegistry, StdioAuthPayload, StdioErrorPayload,
+    CommandEnvelope, CommandRejection, ErrorResponse, SchemaRegistry, StdioAuthPayload,
     StdioEventsSubscribe, StdioFrame, StdioProjectsQuery, SubmitCommandResponse,
 };
 use mp_storage::{CommandMeta, EventStore, NewEvent, ProjectionReader};
 use mp_storage_sqlite::SqliteStore;
 use rand::RngCore;
 use serde::Deserialize;
+use serde_json::Value;
 use std::{
     convert::Infallible,
     net::SocketAddr,
@@ -61,6 +63,7 @@ pub struct StdioConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EventsQuery {
     workspace_id: String,
     #[serde(default)]
@@ -68,6 +71,7 @@ struct EventsQuery {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProjectsQuery {
     workspace_id: String,
 }
@@ -75,6 +79,48 @@ struct ProjectsQuery {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EmptyPayload {}
+
+#[derive(Debug)]
+struct ApiError {
+    status: StatusCode,
+    error: ErrorResponse,
+}
+
+impl ApiError {
+    fn new(
+        status: StatusCode,
+        code: ErrorCode,
+        message: impl Into<String>,
+        details: Option<Value>,
+        trace_id: Option<String>,
+    ) -> Self {
+        Self {
+            status,
+            error: ErrorResponse {
+                code,
+                message: message.into(),
+                details,
+                trace_id,
+            },
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (self.status, Json(self.error)).into_response()
+    }
+}
+
+fn internal_error(trace_id: Option<String>) -> ApiError {
+    ApiError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        ErrorCode::Internal,
+        "internal error",
+        None,
+        trace_id,
+    )
+}
 
 pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let _ = tracing_subscriber::fmt()
@@ -116,6 +162,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             "/v1/events/stream-ndjson",
             axum::routing::get(handle_events_stream_ndjson),
         )
+        .fallback(handle_not_found)
         .with_state(state);
 
     tracing::info!("mpd listening on {}", local_addr);
@@ -150,7 +197,7 @@ pub async fn run_stdio(config: DaemonConfig, stdio: StdioConfig) -> anyhow::Resu
 async fn handle_ping(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<DaemonPingResponse>, StatusCode> {
+) -> Result<Json<DaemonPingResponse>, ApiError> {
     authorize(&state, &headers)?;
     Ok(Json(DaemonPingResponse {
         status: "ok".to_string(),
@@ -162,39 +209,62 @@ async fn handle_ping(
 async fn handle_list_workspaces(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<mp_kernel::WorkspaceListEntry>>, StatusCode> {
+) -> Result<Json<Vec<mp_kernel::WorkspaceListEntry>>, ApiError> {
     authorize(&state, &headers)?;
     let store = state.store.lock().await;
-    let workspaces = store
-        .list_workspaces()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let workspaces = store.list_workspaces().map_err(|err| {
+        tracing::error!("list_workspaces failed: {err}");
+        internal_error(None)
+    })?;
     Ok(Json(workspaces))
 }
 
 async fn handle_list_projects(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<ProjectsQuery>,
-) -> Result<Json<Vec<mp_kernel::ProjectListEntry>>, StatusCode> {
+    query: Result<Query<ProjectsQuery>, QueryRejection>,
+) -> Result<Json<Vec<mp_kernel::ProjectListEntry>>, ApiError> {
     authorize(&state, &headers)?;
+    let Query(query) = query.map_err(|err| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::InvalidSchema,
+            err.to_string(),
+            None,
+            None,
+        )
+    })?;
     let store = state.store.lock().await;
-    let projects = store
-        .list_projects(&query.workspace_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let projects = store.list_projects(&query.workspace_id).map_err(|err| {
+        tracing::error!("list_projects failed: {err}");
+        internal_error(None)
+    })?;
     Ok(Json(projects))
 }
 
 async fn handle_events_read(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<EventsQuery>,
-) -> Result<Json<Vec<mp_protocol::EventEnvelope>>, StatusCode> {
+    query: Result<Query<EventsQuery>, QueryRejection>,
+) -> Result<Json<Vec<mp_protocol::EventEnvelope>>, ApiError> {
     authorize(&state, &headers)?;
+    let Query(query) = query.map_err(|err| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::InvalidSchema,
+            err.to_string(),
+            None,
+            None,
+        )
+    })?;
     let from = query.from.unwrap_or(0);
     let store = state.store.lock().await;
     let events = store
         .read_from(&query.workspace_id, from, None)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|err| {
+            tracing::error!("read_from failed: {err}");
+            internal_error(None)
+        })?;
     Ok(Json(events))
 }
 
@@ -202,12 +272,13 @@ async fn build_event_stream(
     state: &AppState,
     workspace_id: String,
     from: i64,
-) -> Result<impl Stream<Item = mp_protocol::EventEnvelope>, StatusCode> {
+) -> Result<impl Stream<Item = mp_protocol::EventEnvelope>, ApiError> {
     let initial_events = {
         let store = state.store.lock().await;
-        store
-            .read_from(&workspace_id, from, None)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        store.read_from(&workspace_id, from, None).map_err(|err| {
+            tracing::error!("read_from stream failed: {err}");
+            internal_error(None)
+        })?
     };
 
     let mut last_seq = initial_events.last().map(|e| e.seq_global).unwrap_or(from);
@@ -234,12 +305,19 @@ async fn build_event_stream(
 async fn handle_events_stream(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<EventsQuery>,
-) -> Result<
-    Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>,
-    StatusCode,
-> {
+    query: Result<Query<EventsQuery>, QueryRejection>,
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>, ApiError>
+{
     authorize(&state, &headers)?;
+    let Query(query) = query.map_err(|err| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::InvalidSchema,
+            err.to_string(),
+            None,
+            None,
+        )
+    })?;
     let from = query.from.unwrap_or(0);
     let workspace_id = query.workspace_id.clone();
     let stream = build_event_stream(&state, workspace_id, from).await?;
@@ -254,9 +332,18 @@ async fn handle_events_stream(
 async fn handle_events_stream_ndjson(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<EventsQuery>,
-) -> Result<Response<Body>, StatusCode> {
+    query: Result<Query<EventsQuery>, QueryRejection>,
+) -> Result<Response<Body>, ApiError> {
     authorize(&state, &headers)?;
+    let Query(query) = query.map_err(|err| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::InvalidSchema,
+            err.to_string(),
+            None,
+            None,
+        )
+    })?;
     let from = query.from.unwrap_or(0);
     let workspace_id = query.workspace_id.clone();
     let stream = build_event_stream(&state, workspace_id, from).await?;
@@ -271,12 +358,31 @@ async fn handle_events_stream_ndjson(
     Ok(response)
 }
 
+async fn handle_not_found() -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_FOUND,
+        ErrorCode::NotFound,
+        "not found",
+        None,
+        None,
+    )
+}
+
 async fn handle_submit(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(command): Json<CommandEnvelope>,
-) -> Result<Json<SubmitCommandResponse>, StatusCode> {
+    payload: Result<Json<CommandEnvelope>, JsonRejection>,
+) -> Result<Json<SubmitCommandResponse>, ApiError> {
     authorize(&state, &headers)?;
+    let Json(command) = payload.map_err(|err| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::InvalidSchema,
+            err.to_string(),
+            None,
+            None,
+        )
+    })?;
     let response = submit_command_inner(&state, command).await?;
     Ok(Json(response))
 }
@@ -284,10 +390,10 @@ async fn handle_submit(
 async fn submit_command_inner(
     state: &AppState,
     command: CommandEnvelope,
-) -> Result<SubmitCommandResponse, StatusCode> {
+) -> Result<SubmitCommandResponse, ApiError> {
     if state.safe_mode {
         let rejection = CommandRejection {
-            code: "safe_mode".to_string(),
+            code: ErrorCode::PolicyDenied,
             message: "daemon running in safe mode".to_string(),
         };
         return Ok(SubmitCommandResponse {
@@ -344,7 +450,15 @@ async fn submit_command_inner(
     let events = match command_type.as_str() {
         mp_kernel::COMMAND_WORKSPACE_CREATE => {
             let payload: WorkspaceCreatePayload = serde_json::from_value(command.payload.clone())
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
+                .map_err(|err| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    ErrorCode::InvalidSchema,
+                    err.to_string(),
+                    None,
+                    Some(command.trace_id.clone()),
+                )
+            })?;
             if let Some(expected_version) = command.expected_version {
                 if expected_version != 0 {
                     return reject_command(
@@ -364,7 +478,10 @@ async fn submit_command_inner(
                 name: payload.name,
                 root_path,
             })
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|err| {
+                tracing::error!("serialize workspace.created payload failed: {err}");
+                internal_error(Some(command.trace_id.clone()))
+            })?;
             vec![NewEvent {
                 event_type: EVENT_WORKSPACE_CREATED.to_string(),
                 schema_version: 1,
@@ -382,14 +499,23 @@ async fn submit_command_inner(
         }
         mp_kernel::COMMAND_PROJECT_CREATE => {
             let payload: ProjectCreatePayload = serde_json::from_value(command.payload.clone())
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
+                .map_err(|err| {
+                    ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        ErrorCode::InvalidSchema,
+                        err.to_string(),
+                        None,
+                        Some(command.trace_id.clone()),
+                    )
+                })?;
 
             if let Some(expected_version) = command.expected_version {
                 let current = {
                     let store = state.store.lock().await;
-                    store
-                        .head_seq(&payload.workspace_id)
-                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                    store.head_seq(&payload.workspace_id).map_err(|err| {
+                        tracing::error!("head_seq failed: {err}");
+                        internal_error(Some(command.trace_id.clone()))
+                    })?
                 };
                 if current != expected_version {
                     return reject_command(
@@ -407,7 +533,10 @@ async fn submit_command_inner(
                 workspace_id: payload.workspace_id.clone(),
                 name: payload.name,
             })
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|err| {
+                tracing::error!("serialize project.created payload failed: {err}");
+                internal_error(Some(command.trace_id.clone()))
+            })?;
             vec![NewEvent {
                 event_type: EVENT_PROJECT_CREATED.to_string(),
                 schema_version: 1,
@@ -456,7 +585,7 @@ async fn submit_command_inner(
         Ok(result) => result,
         Err(err) => {
             tracing::error!("append failed: {err}");
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            return Err(internal_error(Some(command.trace_id.clone())));
         }
     };
     for event in &append_result.events {
@@ -532,7 +661,7 @@ where
         let frame: StdioFrame = match serde_json::from_str(trimmed) {
             Ok(frame) => frame,
             Err(err) => {
-                send_stdio_error(&out_tx, None, "invalid_schema", err.to_string());
+                send_stdio_error(&out_tx, None, ErrorCode::InvalidSchema, err.to_string());
                 continue;
             }
         };
@@ -541,7 +670,7 @@ where
             send_stdio_error(
                 &out_tx,
                 frame.request_id.clone(),
-                "invalid_schema",
+                ErrorCode::InvalidSchema,
                 "unsupported schema_version".to_string(),
             );
             continue;
@@ -552,7 +681,7 @@ where
                 send_stdio_error(
                     &out_tx,
                     frame.request_id.clone(),
-                    "unauthorized",
+                    ErrorCode::Unauthorized,
                     "auth required".to_string(),
                 );
                 continue;
@@ -563,7 +692,7 @@ where
                         send_stdio_error(
                             &out_tx,
                             frame.request_id.clone(),
-                            "unauthorized",
+                            ErrorCode::Unauthorized,
                             "invalid token".to_string(),
                         );
                         continue;
@@ -580,7 +709,7 @@ where
                     send_stdio_error(
                         &out_tx,
                         frame.request_id.clone(),
-                        "invalid_schema",
+                        ErrorCode::InvalidSchema,
                         err.to_string(),
                     );
                 }
@@ -603,7 +732,12 @@ where
                 {
                     Ok(command) => command,
                     Err(err) => {
-                        send_stdio_error(&out_tx, frame.request_id.clone(), "invalid_schema", err);
+                        send_stdio_error(
+                            &out_tx,
+                            frame.request_id.clone(),
+                            ErrorCode::InvalidSchema,
+                            err,
+                        );
                         continue;
                     }
                 };
@@ -614,13 +748,8 @@ where
                             .unwrap_or_else(|_| serde_json::json!({}));
                         send_stdio_response(&out_tx, frame.request_id, "command.response", payload);
                     }
-                    Err(status) => {
-                        send_stdio_error(
-                            &out_tx,
-                            frame.request_id.clone(),
-                            error_code_from_status(status),
-                            "command failed".to_string(),
-                        );
+                    Err(err) => {
+                        send_stdio_error_response(&out_tx, frame.request_id.clone(), err.error);
                     }
                 }
             }
@@ -629,7 +758,7 @@ where
                     send_stdio_error(
                         &out_tx,
                         frame.request_id.clone(),
-                        "invalid_schema",
+                        ErrorCode::InvalidSchema,
                         err.to_string(),
                     );
                     continue;
@@ -651,7 +780,7 @@ where
                         send_stdio_error(
                             &out_tx,
                             frame.request_id.clone(),
-                            "internal",
+                            ErrorCode::Internal,
                             "query failed".to_string(),
                         );
                     }
@@ -663,7 +792,12 @@ where
                 {
                     Ok(query) => query,
                     Err(err) => {
-                        send_stdio_error(&out_tx, frame.request_id.clone(), "invalid_schema", err);
+                        send_stdio_error(
+                            &out_tx,
+                            frame.request_id.clone(),
+                            ErrorCode::InvalidSchema,
+                            err,
+                        );
                         continue;
                     }
                 };
@@ -684,7 +818,7 @@ where
                         send_stdio_error(
                             &out_tx,
                             frame.request_id.clone(),
-                            "internal",
+                            ErrorCode::Internal,
                             "query failed".to_string(),
                         );
                     }
@@ -695,7 +829,7 @@ where
                     send_stdio_error(
                         &out_tx,
                         frame.request_id.clone(),
-                        "conflict",
+                        ErrorCode::ValidationFailed,
                         "subscription already active".to_string(),
                     );
                     continue;
@@ -705,7 +839,12 @@ where
                 {
                     Ok(sub) => sub,
                     Err(err) => {
-                        send_stdio_error(&out_tx, frame.request_id.clone(), "invalid_schema", err);
+                        send_stdio_error(
+                            &out_tx,
+                            frame.request_id.clone(),
+                            ErrorCode::InvalidSchema,
+                            err,
+                        );
                         continue;
                     }
                 };
@@ -713,13 +852,8 @@ where
                 let workspace_id = sub.workspace_id.clone();
                 let stream = match build_event_stream(&state, workspace_id, from).await {
                     Ok(stream) => stream,
-                    Err(status) => {
-                        send_stdio_error(
-                            &out_tx,
-                            frame.request_id.clone(),
-                            error_code_from_status(status),
-                            "subscribe failed".to_string(),
-                        );
+                    Err(err) => {
+                        send_stdio_error_response(&out_tx, frame.request_id.clone(), err.error);
                         continue;
                     }
                 };
@@ -751,7 +885,7 @@ where
                 send_stdio_error(
                     &out_tx,
                     frame.request_id.clone(),
-                    "unknown_command",
+                    ErrorCode::UnknownCommand,
                     "unknown stdio frame type".to_string(),
                 );
             }
@@ -772,7 +906,7 @@ fn extract_rejection(events: &[mp_protocol::EventEnvelope]) -> Option<CommandRej
             let payload: mp_kernel::CommandRejectedPayload =
                 serde_json::from_value(event.payload.clone()).ok()?;
             Some(CommandRejection {
-                code: payload.code.to_string(),
+                code: payload.code,
                 message: payload.message,
             })
         } else {
@@ -786,7 +920,7 @@ async fn reject_command(
     command: &CommandEnvelope,
     code: ErrorCode,
     message: &str,
-) -> Result<SubmitCommandResponse, StatusCode> {
+) -> Result<SubmitCommandResponse, ApiError> {
     let workspace_id = command
         .payload
         .get("workspace_id")
@@ -800,8 +934,10 @@ async fn reject_command(
         message: message.to_string(),
         details: None,
     };
-    let payload_json =
-        serde_json::to_value(payload).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let payload_json = serde_json::to_value(payload).map_err(|err| {
+        tracing::error!("serialize command.rejected payload failed: {err}");
+        internal_error(Some(command.trace_id.clone()))
+    })?;
 
     let event = NewEvent {
         event_type: EVENT_COMMAND_REJECTED.to_string(),
@@ -830,7 +966,7 @@ async fn reject_command(
         Ok(result) => result,
         Err(err) => {
             tracing::error!("append failed: {err}");
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            return Err(internal_error(Some(command.trace_id.clone())));
         }
     };
     for event in &append_result.events {
@@ -841,7 +977,7 @@ async fn reject_command(
         accepted: false,
         events: append_result.events,
         rejection: Some(CommandRejection {
-            code: code.to_string(),
+            code,
             message: message.to_string(),
         }),
         trace_id: command.trace_id.clone(),
@@ -875,39 +1011,60 @@ fn send_stdio_response(
 fn send_stdio_error(
     out_tx: &mpsc::UnboundedSender<String>,
     request_id: Option<String>,
-    code: &str,
-    message: String,
+    code: ErrorCode,
+    message: impl Into<String>,
 ) {
-    let payload = serde_json::to_value(StdioErrorPayload {
-        code: code.to_string(),
-        message,
-    })
-    .unwrap_or_else(
-        |_| serde_json::json!({ "code": "internal", "message": "serialization error" }),
+    send_stdio_error_response(
+        out_tx,
+        request_id,
+        ErrorResponse {
+            code,
+            message: message.into(),
+            details: None,
+            trace_id: None,
+        },
+    );
+}
+
+fn send_stdio_error_response(
+    out_tx: &mpsc::UnboundedSender<String>,
+    request_id: Option<String>,
+    error: ErrorResponse,
+) {
+    let payload = serde_json::to_value(error).unwrap_or_else(
+        |_| serde_json::json!({ "code": "unknown", "message": "serialization error" }),
     );
     send_stdio_response(out_tx, request_id, "error", payload);
 }
 
-fn error_code_from_status(status: StatusCode) -> &'static str {
-    match status {
-        StatusCode::BAD_REQUEST => "bad_request",
-        StatusCode::UNAUTHORIZED => "unauthorized",
-        StatusCode::FORBIDDEN => "forbidden",
-        StatusCode::NOT_FOUND => "not_found",
-        _ => "internal",
-    }
-}
-
-fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), StatusCode> {
+fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
     let Some(value) = headers.get(axum::http::header::AUTHORIZATION) else {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::Unauthorized,
+            "authorization required",
+            None,
+            None,
+        ));
     };
     let Ok(auth) = value.to_str() else {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::Unauthorized,
+            "authorization invalid",
+            None,
+            None,
+        ));
     };
     let expected = format!("Bearer {}", state.token);
     if auth != expected {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            ErrorCode::Unauthorized,
+            "invalid token",
+            None,
+            None,
+        ));
     }
     Ok(())
 }
@@ -975,4 +1132,19 @@ pub fn default_runtime_dir() -> PathBuf {
 
 pub fn default_db_path() -> PathBuf {
     default_db_path_impl()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_error_produces_redacted_response() {
+        let trace_id = Some("trace_123".to_string());
+        let err = internal_error(trace_id.clone());
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.error.code, ErrorCode::Internal);
+        assert_eq!(err.error.message, "internal error");
+        assert_eq!(err.error.trace_id, trace_id);
+    }
 }

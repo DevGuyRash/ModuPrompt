@@ -109,6 +109,36 @@ Events are immutable records emitted by the daemon.
 - No last-write-wins.
 - Rejections MUST return machine-readable error codes and SHOULD emit a rejection event for audit.
 
+### 5.1 Error codes (canonical)
+
+The daemon MUST return a structured error payload on failure (HTTP non-2xx responses and stdio `error` frames):
+
+```json
+{
+  "code": "invalid_schema",
+  "message": "human-readable summary",
+  "details": {},
+  "trace_id": "tr_..."
+}
+```
+
+`details` and `trace_id` are optional. `code` MUST be one of the following canonical values:
+
+See `schemas/transport/error_response.v1.json` for the canonical schema.
+
+- `invalid_schema` — payload failed JSON schema validation
+- `unknown_command` — command type not recognized
+- `idempotency_key_required` — missing idempotency key for state-changing command
+- `expected_version_mismatch` — optimistic concurrency check failed
+- `validation_failed` — semantic validation failed
+- `unauthorized` — auth missing or invalid
+- `not_found` — resource not found
+- `policy_denied` — denied by policy or safety mode
+- `unknown` — unclassified error
+- `internal` — reserved for internal server errors
+
+Rejections emitted as `command.rejected` MUST use the same `code` set.
+
 ## 6) Realtime streaming
 
 - The daemon exposes event streams to clients via multiple transports (SSE, NDJSON, stdio).

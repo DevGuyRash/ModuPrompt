@@ -121,13 +121,42 @@ Before starting any work, you MUST create a new branch:
 
 ## 9) Pull request workflow
 
+### 9.1 Link related issues
+
+Before creating a PR, check for related issues and link them:
+
+1. **Search for relevant issues:**
+   ```bash
+   gh issue list --search "keyword"
+   gh issue list --label "bug"
+   ```
+2. **Link issues in the PR body** using closing keywords (GitHub will auto-close the issue when the PR merges):
+   - `Closes #123` — general completion
+   - `Fixes #123` — bug fixes
+   - `Resolves #123` — alternative syntax
+3. **For issues that are related but not fully resolved**, reference without closing keywords:
+   - `Related to #123`
+   - `Part of #123`
+
+### 9.2 PR description and reviewers
+
 - When opening a pull request, include both `@codex` and `@gemini-code-assist` (separate lines; at the end of the PR description) to trigger automated review.
 - If you script PR bodies/comments, make sure newlines render as real line breaks (not literal `\n`): prefer `gh pr create --body-file ...` or `gh pr view --template '{{.body}}'` (or `--json body --jq '.body'`) when reading.
 - Commit and PR text should be human-readable; when multi-line bodies are intended, ensure they use real line breaks (avoid literal `\n` in the rendered text).
 
+### 9.3 Updating an existing PR
+
+Before pushing updates to an existing PR:
+
+1. **Read all comments and review threads** (`gh pr view <number> --comments`, or view on GitHub).
+2. **Identify unresolved feedback** — look for unaddressed suggestions, open threads, or requested changes.
+3. **Address or respond to each item** before pushing new commits.
+4. **Reply in the original thread** when addressing feedback (not as a new top-level comment).
+5. **Re-tag `@codex` or `@gemini-code-assist`** only if you implemented their suggestion, so they can verify. Do **not** re-tag if you rejected their feedback — just explain why in the thread.
+
 ### Treating automated reviewer feedback
 
-> **Important:** `@codex` and `@gemini-code-assist` are **not** the source of truth.
+> **Important:** `@codex`, `@gemini-code-assist`, and any code review at all are **not** the source of truth.
 
 Treat their comments like reviews from a helpful but inexperienced junior developer:
 
@@ -137,6 +166,40 @@ Treat their comments like reviews from a helpful but inexperienced junior develo
 4. **If a suggestion is valid and you make changes:** Reply in the **same thread** (not a new top-level comment) to keep context together. **Do tag the bot again** so it can verify the fix was applied correctly.
 5. **Useful for catching:** typos, obvious bugs, missing tests, style drift. Less reliable for: architectural decisions, invariant enforcement, security boundaries.
 
+## 10) Commit conventions
+
+Use **Conventional Commits** format for all commits.
+
+### 10.1 Message format
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+- **Types:** `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, `ci`
+- **Scope:** optional but encouraged (e.g., `feat(cli): add --json flag`, `fix(daemon): handle connection timeout`)
+- **Description:** imperative mood ("Add feature" not "Added feature"), lowercase, no period
+
+### 10.2 Atomic commits
+
+- Each commit SHOULD represent **one logical change**.
+- Batch related file changes into a single commit (e.g., code + tests + docs for one feature).
+- Avoid mixing unrelated changes in one commit.
+
+### 10.3 Examples
+
+```
+feat(cli): add workspace init command
+fix(daemon): prevent duplicate event emission on retry
+docs: update kernel contract with error codes
+refactor(storage): extract projection rebuild logic
+test(protocol): add characterization test for unknown fields
+chore: update dependencies
+```
 
 ## Mandatory Rust Coding Guidelines
 

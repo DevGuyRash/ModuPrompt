@@ -33,16 +33,29 @@ pub fn command_kind(command_type: &str) -> Option<CommandKind> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Stable daemon error codes exposed on the wire and by clients.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
+    /// Input payload failed JSON schema validation.
     InvalidSchema,
+    /// Command type is not recognized.
     UnknownCommand,
+    /// State-changing commands must provide an idempotency key.
     IdempotencyKeyRequired,
+    /// Optimistic concurrency check failed.
     ExpectedVersionMismatch,
+    /// Input was well-formed but semantically invalid for the operation.
     ValidationFailed,
+    /// Authentication failed or missing.
     Unauthorized,
+    /// Requested resource does not exist.
     NotFound,
+    /// Action was denied by policy or safety mode.
+    PolicyDenied,
+    /// Unclassified error condition.
+    Unknown,
+    /// Internal server error (reserved for future use).
     Internal,
 }
 
@@ -56,6 +69,8 @@ impl fmt::Display for ErrorCode {
             ErrorCode::ValidationFailed => "validation_failed",
             ErrorCode::Unauthorized => "unauthorized",
             ErrorCode::NotFound => "not_found",
+            ErrorCode::PolicyDenied => "policy_denied",
+            ErrorCode::Unknown => "unknown",
             ErrorCode::Internal => "internal",
         };
         write!(f, "{s}")
@@ -206,6 +221,8 @@ mod tests {
         assert_eq!(ErrorCode::ValidationFailed.to_string(), "validation_failed");
         assert_eq!(ErrorCode::Unauthorized.to_string(), "unauthorized");
         assert_eq!(ErrorCode::NotFound.to_string(), "not_found");
+        assert_eq!(ErrorCode::PolicyDenied.to_string(), "policy_denied");
+        assert_eq!(ErrorCode::Unknown.to_string(), "unknown");
         assert_eq!(ErrorCode::Internal.to_string(), "internal");
     }
 
