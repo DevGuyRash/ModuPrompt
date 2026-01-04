@@ -392,16 +392,13 @@ async fn submit_command_inner(
     command: CommandEnvelope,
 ) -> Result<SubmitCommandResponse, ApiError> {
     if state.safe_mode {
-        let rejection = CommandRejection {
-            code: ErrorCode::PolicyDenied,
-            message: "daemon running in safe mode".to_string(),
-        };
-        return Ok(SubmitCommandResponse {
-            accepted: false,
-            events: Vec::new(),
-            rejection: Some(rejection),
-            trace_id: command.trace_id,
-        });
+        return reject_command(
+            state,
+            &command,
+            ErrorCode::PolicyDenied,
+            "daemon running in safe mode",
+        )
+        .await;
     }
 
     let command_type = command.command_type.clone();
