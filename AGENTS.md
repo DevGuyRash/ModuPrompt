@@ -156,6 +156,40 @@ Treat their comments like reviews from a helpful but inexperienced junior develo
 4. **If a suggestion is valid and you make changes:** Reply in the **same thread** (not a new top-level comment) to keep context together. **Do tag the bot again** so it can verify the fix was applied correctly.
 5. **Useful for catching:** typos, obvious bugs, missing tests, style drift. Less reliable for: architectural decisions, invariant enforcement, security boundaries.
 
+## 10) Commit conventions
+
+Use **Conventional Commits** format for all commits.
+
+### 10.1 Message format
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+- **Types:** `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, `ci`
+- **Scope:** optional but encouraged (e.g., `feat(cli): add --json flag`, `fix(daemon): handle connection timeout`)
+- **Description:** imperative mood ("Add feature" not "Added feature"), lowercase, no period
+
+### 10.2 Atomic commits
+
+- Each commit SHOULD represent **one logical change**.
+- Batch related file changes into a single commit (e.g., code + tests + docs for one feature).
+- Avoid mixing unrelated changes in one commit.
+
+### 10.3 Examples
+
+```
+feat(cli): add workspace init command
+fix(daemon): prevent duplicate event emission on retry
+docs: update kernel contract with error codes
+refactor(storage): extract projection rebuild logic
+test(protocol): add characterization test for unknown fields
+chore: update dependencies
+```
 
 ## Mandatory Rust Coding Guidelines
 
