@@ -1069,21 +1069,6 @@ fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn internal_error_produces_redacted_response() {
-        let trace_id = Some("trace_123".to_string());
-        let err = internal_error(trace_id.clone());
-        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(err.error.code, ErrorCode::Internal);
-        assert_eq!(err.error.message, "internal error");
-        assert_eq!(err.error.trace_id, trace_id);
-    }
-}
-
 fn generate_token() -> anyhow::Result<String> {
     let mut buf = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut buf);
@@ -1147,4 +1132,19 @@ pub fn default_runtime_dir() -> PathBuf {
 
 pub fn default_db_path() -> PathBuf {
     default_db_path_impl()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_error_produces_redacted_response() {
+        let trace_id = Some("trace_123".to_string());
+        let err = internal_error(trace_id.clone());
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.error.code, ErrorCode::Internal);
+        assert_eq!(err.error.message, "internal error");
+        assert_eq!(err.error.trace_id, trace_id);
+    }
 }
