@@ -43,3 +43,27 @@ See `kernel/transport.md` for transport layer details.
 3. `events watch` streaming.
 4. Batch workflow submit.
 5. TUI exploration (optional).
+
+## 7) Error handling contract (v1)
+
+When `--json` is used, CLI errors MUST render the canonical error object:
+
+- `code` (string, enum; see kernel contract)
+- `message` (string)
+- `details` (optional; empty object in v1)
+- `trace_id` (optional)
+
+Stable exit codes (v1):
+
+| Error code | Exit code | Notes |
+| --- | --- | --- |
+| `invalid_schema` | 2 | schema validation failure |
+| `validation_failed` | 2 | semantic validation failure |
+| `idempotency_key_required` | 2 | missing idempotency key |
+| `unknown_command` | 2 | unknown command type |
+| `expected_version_mismatch` | 3 | optimistic concurrency conflict |
+| `unauthorized` | 4 | auth missing or invalid |
+| `not_found` | 5 | requested resource not found |
+| `policy_denied` | 6 | policy or safe-mode denial |
+| `unknown` | 1 | unclassified failure |
+| `internal` | 1 | internal server error |

@@ -1,7 +1,7 @@
 use futures::StreamExt;
 use mp_client::Client;
 use mp_daemon::{run_daemon, run_stdio_with_io, DaemonConfig, StdioAuth, StdioConfig};
-use mp_kernel::{ErrorCode, RuntimeInfo};
+use mp_kernel::{CommandRejectedPayload, ErrorCode, RuntimeInfo, EVENT_COMMAND_REJECTED};
 use mp_protocol::{CommandEnvelope, ErrorResponse, StdioFrame, SubmitCommandResponse};
 use reqwest::header::AUTHORIZATION;
 use reqwest::StatusCode;
@@ -258,6 +258,73 @@ async fn schema_failure_rejects_with_error_code() -> anyhow::Result<()> {
     assert!(!response.accepted);
     let rejection = response.rejection.expect("rejection");
     assert_eq!(rejection.code, ErrorCode::InvalidSchema);
+
+    handle.abort();
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn safe_mode_rejection_emits_command_rejected_event() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let db_path = temp.path().join("mpd.sqlite");
+    let runtime_dir = temp.path().join("run");
+
+    let config = DaemonConfig {
+        db_path,
+        addr: "127.0.0.1:0".parse::<SocketAddr>()?,
+        runtime_dir: runtime_dir.clone(),
+        safe_mode: true,
+    };
+
+    let handle = tokio::spawn(run_daemon(config));
+    let _client = wait_for_client(&runtime_dir).await?;
+    let info = read_runtime_info(&runtime_dir).await?;
+
+    let envelope = CommandEnvelope {
+        command_type: "workspace.create".to_string(),
+        schema_version: 1,
+        payload: serde_json::json!({
+            "name": "safe-mode",
+            "path": "./safe-mode"
+        }),
+        idempotency_key: Some("ik_safe_mode".to_string()),
+        expected_version: None,
+        trace_id: "tr_safe_mode".to_string(),
+    };
+
+    let submit_url = format!("{}/v1/commands/submit", info.addr);
+    let submit_resp = reqwest::Client::new()
+        .post(submit_url)
+        .header(AUTHORIZATION, format!("Bearer {}", info.token))
+        .json(&envelope)
+        .send()
+        .await?;
+    assert_eq!(submit_resp.status(), StatusCode::OK);
+    let response: SubmitCommandResponse = submit_resp.json().await?;
+    assert!(!response.accepted);
+    let rejection = response.rejection.expect("rejection");
+    assert_eq!(rejection.code, ErrorCode::PolicyDenied);
+    assert_eq!(response.trace_id, "tr_safe_mode");
+
+    let events_url = format!("{}/v1/events?workspace_id=global&from=0", info.addr);
+    let events_resp = reqwest::Client::new()
+        .get(events_url)
+        .header(AUTHORIZATION, format!("Bearer {}", info.token))
+        .send()
+        .await?;
+    assert_eq!(events_resp.status(), StatusCode::OK);
+    let events: Vec<mp_protocol::EventEnvelope> = events_resp.json().await?;
+    let rejection_event = events
+        .into_iter()
+        .find(|event| event.event_type == EVENT_COMMAND_REJECTED)
+        .expect("command.rejected event");
+    assert_eq!(
+        rejection_event.trace_id.as_deref(),
+        Some("tr_safe_mode")
+    );
+    let payload: CommandRejectedPayload =
+        serde_json::from_value(rejection_event.payload).expect("payload");
+    assert_eq!(payload.code, ErrorCode::PolicyDenied);
 
     handle.abort();
     Ok(())
