@@ -144,6 +144,16 @@ Before creating a PR, check for related issues and link them:
 - If you script PR bodies/comments, make sure newlines render as real line breaks (not literal `\n`): prefer `gh pr create --body-file ...` or `gh pr view --template '{{.body}}'` (or `--json body --jq '.body'`) when reading.
 - Commit and PR text should be human-readable; when multi-line bodies are intended, ensure they use real line breaks (avoid literal `\n` in the rendered text).
 
+### 9.3 Updating an existing PR
+
+Before pushing updates to an existing PR:
+
+1. **Read all comments and review threads** (`gh pr view <number> --comments`, or view on GitHub).
+2. **Identify unresolved feedback** — look for unaddressed suggestions, open threads, or requested changes.
+3. **Address or respond to each item** before pushing new commits.
+4. **Reply in the original thread** when addressing feedback (not as a new top-level comment).
+5. **Re-tag `@codex` or `@gemini-code-assist`** only if you implemented their suggestion, so they can verify. Do **not** re-tag if you rejected their feedback — just explain why in the thread.
+
 ### Treating automated reviewer feedback
 
 > **Important:** `@codex`, `@gemini-code-assist`, and any code review at all are **not** the source of truth.
