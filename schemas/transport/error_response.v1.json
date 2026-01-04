@@ -23,7 +23,8 @@
     "details": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "description": "Optional structured details (empty object in v1)."
+      "maxProperties": 0,
+      "description": "Optional structured details (must be empty object in v1)."
     },
     "trace_id": { "type": "string" }
   }
